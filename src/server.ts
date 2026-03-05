@@ -33,6 +33,30 @@ app.post("/api/generate", async (req, res) => {
 
 app.use("/api/assets", assetsRouter);
 
+app.use(
+  (
+    error: Error & { statusCode?: number; details?: unknown },
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction,
+  ) => {
+    const statusCode = error.statusCode ?? 500;
+    const payload: { error: string; details?: unknown } = {
+      error: error.message || "Internal server error",
+    };
+
+    if (error.details !== undefined) {
+      payload.details = error.details;
+    }
+
+    if (statusCode >= 500) {
+      console.error("Unhandled server error", error);
+    }
+
+    res.status(statusCode).json(payload);
+  },
+);
+
 app.use(express.static(path.resolve(process.cwd(), "client")));
 
 app.get("*", (_req, res) => {
