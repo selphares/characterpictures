@@ -1,6 +1,7 @@
 import express from "express";
 import path from "node:path";
 
+import assetsRouter from "./routes/assets.js";
 import { generateImageStub } from "./lib/image-service.js";
 import { ensureOutputsDir } from "./lib/storage.js";
 
@@ -29,6 +30,8 @@ app.post("/api/generate", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+app.use("/api/assets", assetsRouter);
 
 app.use(express.static(path.resolve(process.cwd(), "client")));
 
