@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Character Picture Studio</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header panel">
+        <h1>Character Picture Studio</h1>
+        <p>Generiere und verwalte Character-Assets mit Live-Preview.</p>
+      </header>
+
+      <main class="app-main">
+        <section class="panel" aria-labelledby="form-heading">
+          <h2 id="form-heading">Form Panel</h2>
+          <form id="generate-form" class="form-grid">
+            <label>
+              Name
+              <input id="name" name="name" required placeholder="z. B. Aria" />
+            </label>
+
+            <label>
+              Hauptbeschreibung
+              <textarea
+                id="description"
+                name="description"
+                rows="4"
+                required
+                placeholder="Kurze Beschreibung der Figur"
+              ></textarea>
+            </label>
+
+            <label>
+              Stil
+              <input id="style" name="style" required placeholder="z. B. Anime, Pixel, Realistisch" />
+            </label>
+
+            <label>
+              Hinweise
+              <textarea
+                id="notes"
+                name="notes"
+                rows="3"
+                placeholder="Zusätzliche Hinweise, Pose, Farbpalette ..."
+              ></textarea>
+            </label>
+
+            <label>
+              Zielordner (optional)
+              <input id="targetFolder" name="targetFolder" placeholder="z. B. outputs/aria" />
+            </label>
+
+            <div class="actions-row">
+              <button id="generate-full-set" type="submit">Full-Set generieren</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel" aria-labelledby="asset-actions-heading">
+          <h2 id="asset-actions-heading">Asset Actions Panel</h2>
+          <p>Re-Generate pro Asset-Typ:</p>
+          <div id="asset-actions" class="button-grid"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="output-heading">
+          <h2 id="output-heading">Output/Preview Panel</h2>
+          <div class="output-toolbar">
+            <button id="refresh-outputs" type="button">Outputs neu laden</button>
+          </div>
+          <div id="output-gallery" class="output-gallery" role="list"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="feedback-heading">
+          <h2 id="feedback-heading">Progress/Feedback Panel</h2>
+          <div id="loading-indicator" class="status-line hidden" aria-live="polite">Lädt…</div>
+          <div id="success-message" class="status-line success hidden" aria-live="polite"></div>
+          <div id="error-message" class="status-line error hidden" aria-live="assertive"></div>
+          <ul id="activity-log" class="activity-log"></ul>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./app.ts"></script>
+  </body>
+</html>
