@@ -1,35 +1,47 @@
-import express, { NextFunction, Request, Response } from 'express';
-import assetRoutes from './routes/assets';
+import express from "express";
+import path from "node:path";
 
-type ApiError = Error & {
-  statusCode?: number;
-  code?: string;
-  details?: unknown;
-};
+import { generateImageStub } from "./lib/image-service.js";
+import { ensureOutputsDir } from "./lib/storage.js";
 
 const app = express();
+const port = Number(process.env.PORT ?? 3000);
 
 app.use(express.json());
-app.use('/api/assets', assetRoutes);
 
-app.use((error: ApiError, _req: Request, res: Response, _next: NextFunction) => {
-  const status = error.statusCode ?? 500;
-
-  if (status >= 500) {
-    console.error('[api-error]', {
-      message: error.message,
-      stack: error.stack,
-      details: error.details,
-    });
-  }
-
-  res.status(status).json({
-    error: {
-      message: error.message || 'Internal Server Error',
-      code: error.code ?? (status >= 500 ? 'INTERNAL_ERROR' : 'BAD_REQUEST'),
-      details: error.details,
-    },
-  });
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true });
 });
 
-export default app;
+app.post("/api/generate", async (req, res) => {
+  const characterName = String(req.body?.characterName ?? "");
+
+  if (!characterName.trim()) {
+    res.status(400).json({ error: "characterName is required" });
+    return;
+  }
+
+  try {
+    const result = await generateImageStub({ characterName });
+    res.status(201).json(result);
+  } catch (error) {
+    console.error("Failed to generate image metadata", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.use(express.static(path.resolve(process.cwd(), "client")));
+
+app.get("*", (_req, res) => {
+  res.sendFile(path.resolve(process.cwd(), "client/index.html"));
+});
+
+async function start(): Promise<void> {
+  await ensureOutputsDir();
+
+  app.listen(port, () => {
+    console.log(`Server running on http://localhost:${port}`);
+  });
+}
+
+void start();
