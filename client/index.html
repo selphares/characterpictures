@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Character Pictures</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <h1>Character Pictures</h1>
+      <p>Ein minimales Frontend für die Generierung von Charakter-Metadaten.</p>
+
+      <form id="generator-form">
+        <label for="characterName">Charaktername</label>
+        <input id="characterName" name="characterName" type="text" required />
+        <button type="submit">Generieren</button>
+      </form>
+
+      <pre id="result" aria-live="polite"></pre>
+    </main>
+
+    <script type="module" src="/app.ts"></script>
+  </body>
+</html>
