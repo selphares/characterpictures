@@ -8,16 +8,61 @@
   </head>
   <body>
     <main class="app">
-      <h1>Character Pictures</h1>
-      <p>Ein minimales Frontend für die Generierung von Charakter-Metadaten.</p>
+      <header class="header">
+        <h1>Character Pictures</h1>
+        <p>
+          Vollständiges Demo-Frontend für Prompt, Stil, Seed, Asset-Auswahl und
+          Regeneration einzelner Assets.
+        </p>
+      </header>
 
-      <form id="generator-form">
-        <label for="characterName">Charaktername</label>
-        <input id="characterName" name="characterName" type="text" required />
-        <button type="submit">Generieren</button>
+      <form id="generator-form" class="panel">
+        <label for="prompt">Prompt</label>
+        <textarea
+          id="prompt"
+          name="prompt"
+          rows="3"
+          required
+          placeholder="z. B. A mysterious ranger in moonlight"
+        ></textarea>
+
+        <div class="row">
+          <div>
+            <label for="style">Style (optional)</label>
+            <input id="style" name="style" type="text" placeholder="watercolor, anime, pixel" />
+          </div>
+          <div>
+            <label for="seed">Seed (optional)</label>
+            <input id="seed" name="seed" type="number" min="0" step="1" placeholder="42" />
+          </div>
+        </div>
+
+        <fieldset>
+          <legend>Asset-Typen</legend>
+          <div class="checkbox-grid">
+            <label><input type="checkbox" name="assetTypes" value="character" checked /> Character</label>
+            <label><input type="checkbox" name="assetTypes" value="avatar" checked /> Avatar</label>
+            <label><input type="checkbox" name="assetTypes" value="portrait" checked /> Portrait</label>
+            <label><input type="checkbox" name="assetTypes" value="token" /> Token</label>
+            <label><input type="checkbox" name="assetTypes" value="background" /> Background</label>
+          </div>
+        </fieldset>
+
+        <button id="generate-btn" type="submit">Assets generieren</button>
       </form>
 
-      <pre id="result" aria-live="polite"></pre>
+      <p id="status" class="status" aria-live="polite"></p>
+
+      <section id="job-section" class="panel hidden" aria-live="polite">
+        <h2>Generierter Job</h2>
+        <div class="job-meta" id="job-meta"></div>
+        <ul id="asset-list" class="asset-list"></ul>
+      </section>
+
+      <section class="panel">
+        <h2>Rohdaten</h2>
+        <pre id="result" aria-live="polite"></pre>
+      </section>
     </main>
 
     <script type="module" src="/app.js"></script>
