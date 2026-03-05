@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { createGenerationJob, regenerateAsset } from '../lib/generation';
-import { CharacterRequest, RegenerateAssetRequest } from '../types';
+
+import { createGenerationJob, regenerateAsset } from '../lib/generation.js';
+import { CharacterRequest, RegenerateAssetRequest } from '../types.js';
 
 const router = Router();
 
