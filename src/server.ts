@@ -4,6 +4,7 @@ import path from "node:path";
 import assetsRouter from "./routes/assets.js";
 import { generateImageStub } from "./lib/image-service.js";
 import { ensureOutputsDir } from "./lib/storage.js";
+import { loadLocalEnvFile } from "./lib/env.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
@@ -64,6 +65,7 @@ app.get("*", (_req, res) => {
 });
 
 async function start(): Promise<void> {
+  await loadLocalEnvFile();
   await ensureOutputsDir();
 
   app.listen(port, () => {
