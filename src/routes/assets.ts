@@ -4,12 +4,19 @@ import { Router } from 'express';
 
 import { createGenerationJob, regenerateAsset } from '../lib/generation.js';
 import { getOutputsDir } from '../lib/storage.js';
-import { AssetType, CharacterRequest, RegenerateAssetRequest } from '../types.js';
+import {
+  AssetType,
+  CharacterRequest,
+  GenerationProfile,
+  RegenerateAssetRequest,
+} from '../types.js';
 
 const router = Router();
 const MAX_COUNT = 8;
 const VALID_ASSET_TYPES: AssetType[] = ['character', 'avatar', 'portrait', 'token', 'background'];
 const VALID_ASSET_TYPE_SET = new Set<AssetType>(VALID_ASSET_TYPES);
+const VALID_PROFILES: GenerationProfile[] = ['illustration', 'jrpg_assets'];
+const VALID_PROFILE_SET = new Set<GenerationProfile>(VALID_PROFILES);
 
 const createBadRequestError = (message: string, details?: unknown) => {
   const error = new Error(message) as Error & { statusCode?: number; details?: unknown };
@@ -48,6 +55,33 @@ const parseOptionalSeed = (value: unknown, context: 'CharacterRequest' | 'Regene
   return parsed;
 };
 
+const parseOptionalText = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+};
+
+const parseOptionalProfile = (
+  value: unknown,
+  context: 'CharacterRequest' | 'RegenerateAssetRequest',
+): GenerationProfile | undefined => {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+
+  if (typeof value !== 'string' || !VALID_PROFILE_SET.has(value as GenerationProfile)) {
+    throw createBadRequestError(`Invalid ${context} payload.`, {
+      reason: 'profile contains unsupported value',
+      allowed: VALID_PROFILES,
+    });
+  }
+
+  return value as GenerationProfile;
+};
+
 const sanitizeCharacterRequest = (payload: unknown): CharacterRequest => {
   const body = (payload ?? {}) as Record<string, unknown>;
   const promptRaw = body.prompt;
@@ -84,11 +118,11 @@ const sanitizeCharacterRequest = (payload: unknown): CharacterRequest => {
     }
   }
 
-  const styleRaw = body.style;
-
   return {
     prompt: promptRaw.trim(),
-    style: typeof styleRaw === 'string' && styleRaw.trim() ? styleRaw.trim() : undefined,
+    style: parseOptionalText(body.style),
+    profile: parseOptionalProfile(body.profile, 'CharacterRequest'),
+    formatNotes: parseOptionalText(body.formatNotes),
     seed: parseOptionalSeed(body.seed, 'CharacterRequest'),
     count: parseOptionalCount(body.count),
     assetTypes: parsedAssetTypes,
@@ -123,16 +157,15 @@ const sanitizeRegenerateRequest = (payload: unknown): RegenerateAssetRequest => 
     });
   }
 
-  const promptOverrideRaw = body.promptOverride;
-
   return {
     jobId: jobIdRaw.trim(),
     fileId: fileIdRaw.trim(),
     assetType: assetTypeRaw as AssetType,
-    promptOverride:
-      typeof promptOverrideRaw === 'string' && promptOverrideRaw.trim()
-        ? promptOverrideRaw.trim()
-        : undefined,
+    basePrompt: parseOptionalText(body.basePrompt),
+    style: parseOptionalText(body.style),
+    profile: parseOptionalProfile(body.profile, 'RegenerateAssetRequest'),
+    formatNotes: parseOptionalText(body.formatNotes),
+    promptOverride: parseOptionalText(body.promptOverride),
     seed: parseOptionalSeed(body.seed, 'RegenerateAssetRequest'),
   };
 };

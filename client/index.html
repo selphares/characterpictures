@@ -11,8 +11,8 @@
       <header class="header">
         <h1>Character Pictures</h1>
         <p>
-          Vollstandiges Demo-Frontend fur Prompt, Stil, Seed, Asset-Auswahl, Variantenanzahl und
-          Regeneration einzelner Assets.
+          Demo-Frontend fur Prompt, Stil, Profil, strikte Format-Hinweise, Asset-Auswahl,
+          Variantenanzahl und Regeneration einzelner Assets.
         </p>
       </header>
 
@@ -23,13 +23,20 @@
           name="prompt"
           rows="3"
           required
-          placeholder="z. B. A mysterious ranger in moonlight"
+          placeholder="z. B. Junge Wissenschaftlerin mit weissem Bob-Haarschnitt in weisser Tech-Jacke"
         ></textarea>
 
         <div class="row">
           <div>
             <label for="style">Style (optional)</label>
-            <input id="style" name="style" type="text" placeholder="watercolor, anime, pixel" />
+            <input id="style" name="style" type="text" placeholder="anime, pixel art, clean lineart" />
+          </div>
+          <div>
+            <label for="profile">Profil</label>
+            <select id="profile" name="profile">
+              <option value="jrpg_assets" selected>JRPG Assets (empfohlen)</option>
+              <option value="illustration">Illustration</option>
+            </select>
           </div>
           <div>
             <label for="seed">Seed (optional)</label>
@@ -41,13 +48,21 @@
           </div>
         </div>
 
+        <label for="formatNotes">Format-Hinweise (optional, aber sehr hilfreich)</label>
+        <textarea
+          id="formatNotes"
+          name="formatNotes"
+          rows="2"
+          placeholder="z. B. Token mit transparenten Ecken; Portrait nicht naher als Brustbereich; Character immer komplett sichtbar"
+        ></textarea>
+
         <fieldset>
           <legend>Asset-Typen</legend>
           <div class="checkbox-grid">
             <label><input type="checkbox" name="assetTypes" value="character" checked /> Character</label>
             <label><input type="checkbox" name="assetTypes" value="avatar" checked /> Avatar</label>
             <label><input type="checkbox" name="assetTypes" value="portrait" checked /> Portrait</label>
-            <label><input type="checkbox" name="assetTypes" value="token" /> Token</label>
+            <label><input type="checkbox" name="assetTypes" value="token" checked /> Token</label>
             <label><input type="checkbox" name="assetTypes" value="background" /> Background</label>
           </div>
         </fieldset>

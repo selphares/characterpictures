@@ -33,6 +33,26 @@ const asJson = async (response) => {
   return payload;
 };
 
+const formatProfileLabel = (profile) => {
+  if (profile === 'jrpg_assets') {
+    return 'JRPG Assets';
+  }
+
+  if (profile === 'illustration') {
+    return 'Illustration';
+  }
+
+  return profile || 'n/a';
+};
+
+const formatDimensions = (file) => {
+  if (!Number.isInteger(file.width) || !Number.isInteger(file.height)) {
+    return 'unbekannt';
+  }
+
+  return `${file.width} x ${file.height}`;
+};
+
 const renderJob = (job) => {
   if (!jobMeta || !assetList || !jobSection) return;
 
@@ -43,7 +63,9 @@ const renderJob = (job) => {
     <p><strong>Job-ID:</strong> <code>${escapeHtml(job.id)}</code></p>
     <p><strong>Status:</strong> ${escapeHtml(job.status)}</p>
     <p><strong>Erstellt:</strong> ${new Date(job.metadata.generatedAt).toLocaleString('de-DE')}</p>
+    <p><strong>Profil:</strong> ${escapeHtml(formatProfileLabel(job.metadata.profile))}</p>
     <p><strong>Varianten pro Typ:</strong> ${escapeHtml(countInfo)}</p>
+    ${job.metadata.formatNotes ? `<p><strong>Format-Hinweise:</strong> ${escapeHtml(job.metadata.formatNotes)}</p>` : ''}
   `;
 
   assetList.innerHTML = '';
@@ -65,6 +87,7 @@ const renderJob = (job) => {
         ${variantMarkup}
         <p><strong>Datei:</strong> ${escapeHtml(file.filename)}</p>
         <p><strong>ID:</strong> <code>${escapeHtml(file.id)}</code></p>
+        <p><strong>Format:</strong> ${escapeHtml(formatDimensions(file))}</p>
         ${imageMarkup}
       </div>
       <button type="button" data-file-id="${escapeHtml(file.id)}" data-asset-type="${escapeHtml(file.type)}">Neu generieren</button>
@@ -96,15 +119,17 @@ const regenerate = async (file) => {
           jobId: currentJob.id,
           fileId: file.id,
           assetType: file.type,
+          basePrompt: currentJob.request.prompt,
+          style: currentJob.request.style,
+          profile: currentJob.request.profile,
+          formatNotes: currentJob.request.formatNotes,
           promptOverride: promptOverride || undefined,
           seed: currentJob.request.seed,
         }),
       }),
     );
 
-    currentJob.files = currentJob.files.map((entry) =>
-      entry.id === file.id ? regenerated : entry,
-    );
+    currentJob.files = currentJob.files.map((entry) => (entry.id === file.id ? regenerated : entry));
 
     renderJob(currentJob);
     result.textContent = JSON.stringify(
@@ -127,6 +152,8 @@ if (form && result && generateBtn) {
     const formData = new FormData(form);
     const prompt = String(formData.get('prompt') ?? '').trim();
     const style = String(formData.get('style') ?? '').trim();
+    const profile = String(formData.get('profile') ?? '').trim();
+    const formatNotes = String(formData.get('formatNotes') ?? '').trim();
     const seedText = String(formData.get('seed') ?? '').trim();
     const countText = String(formData.get('count') ?? '').trim();
     const assetTypes = formData.getAll('assetTypes').map(String);
@@ -145,6 +172,8 @@ if (form && result && generateBtn) {
     const payload = {
       prompt,
       style: style || undefined,
+      profile: profile || undefined,
+      formatNotes: formatNotes || undefined,
       seed: seedText ? Number(seedText) : undefined,
       count: parsedCount,
       assetTypes,

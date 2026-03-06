@@ -5,9 +5,13 @@ export type AssetType =
   | 'token'
   | 'background';
 
+export type GenerationProfile = 'illustration' | 'jrpg_assets';
+
 export interface CharacterRequest {
   prompt: string;
   style?: string;
+  profile?: GenerationProfile;
+  formatNotes?: string;
   seed?: number;
   assetTypes: AssetType[];
   count?: number;
@@ -17,6 +21,10 @@ export interface RegenerateAssetRequest {
   jobId: string;
   assetType: AssetType;
   fileId: string;
+  basePrompt?: string;
+  style?: string;
+  profile?: GenerationProfile;
+  formatNotes?: string;
   promptOverride?: string;
   seed?: number;
 }
@@ -28,6 +36,8 @@ export interface GeneratedFileInfo {
   filename: string;
   mimeType: string;
   bytes: number;
+  width?: number;
+  height?: number;
   url: string;
   createdAt: string;
   error?: string;
@@ -36,6 +46,8 @@ export interface GeneratedFileInfo {
 export interface OutputMetadata {
   prompt: string;
   style?: string;
+  profile?: GenerationProfile;
+  formatNotes?: string;
   seed?: number;
   count?: number;
   model?: string;
