@@ -4,7 +4,12 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
 Write-Host "Setze ExecutionPolicy für den aktuellen User ..." -ForegroundColor Cyan
-Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
+try {
+  Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
+} catch {
+  Write-Host "Hinweis: ExecutionPolicy konnte nicht gesetzt werden ($($_.Exception.Message))." -ForegroundColor Yellow
+  Write-Host "Der Start wird trotzdem fortgesetzt ..." -ForegroundColor Yellow
+}
 
 if (-not (Test-Path ".env")) {
   if (Test-Path ".env.example") {
