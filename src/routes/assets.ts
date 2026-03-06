@@ -4,26 +4,142 @@ import { Router } from 'express';
 
 import { createGenerationJob, regenerateAsset } from '../lib/generation.js';
 import { getOutputsDir } from '../lib/storage.js';
-import { CharacterRequest, RegenerateAssetRequest } from '../types.js';
+import { AssetType, CharacterRequest, RegenerateAssetRequest } from '../types.js';
 
 const router = Router();
+const MAX_COUNT = 8;
+const VALID_ASSET_TYPES: AssetType[] = ['character', 'avatar', 'portrait', 'token', 'background'];
+const VALID_ASSET_TYPE_SET = new Set<AssetType>(VALID_ASSET_TYPES);
+
+const createBadRequestError = (message: string, details?: unknown) => {
+  const error = new Error(message) as Error & { statusCode?: number; details?: unknown };
+  error.statusCode = 400;
+  error.details = details;
+  return error;
+};
+
+const parseOptionalCount = (value: unknown): number | undefined => {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_COUNT) {
+    throw createBadRequestError('Invalid CharacterRequest payload.', {
+      reason: `count must be an integer between 1 and ${MAX_COUNT}`,
+    });
+  }
+
+  return parsed;
+};
+
+const parseOptionalSeed = (value: unknown, context: 'CharacterRequest' | 'RegenerateAssetRequest') => {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw createBadRequestError(`Invalid ${context} payload.`, {
+      reason: 'seed must be a finite number',
+    });
+  }
+
+  return parsed;
+};
+
+const sanitizeCharacterRequest = (payload: unknown): CharacterRequest => {
+  const body = (payload ?? {}) as Record<string, unknown>;
+  const promptRaw = body.prompt;
+
+  if (typeof promptRaw !== 'string' || !promptRaw.trim()) {
+    throw createBadRequestError('Invalid CharacterRequest payload.', {
+      required: ['prompt', 'assetTypes'],
+      reason: 'prompt must be a non-empty string',
+    });
+  }
+
+  const assetTypesRaw = body.assetTypes;
+  if (!Array.isArray(assetTypesRaw) || assetTypesRaw.length === 0) {
+    throw createBadRequestError('Invalid CharacterRequest payload.', {
+      required: ['prompt', 'assetTypes'],
+      reason: 'assetTypes must be a non-empty array',
+      allowed: VALID_ASSET_TYPES,
+    });
+  }
+
+  const parsedAssetTypes: AssetType[] = [];
+  for (const rawType of assetTypesRaw) {
+    if (typeof rawType !== 'string' || !VALID_ASSET_TYPE_SET.has(rawType as AssetType)) {
+      throw createBadRequestError('Invalid CharacterRequest payload.', {
+        required: ['prompt', 'assetTypes'],
+        reason: 'assetTypes contains unsupported values',
+        allowed: VALID_ASSET_TYPES,
+      });
+    }
+
+    const assetType = rawType as AssetType;
+    if (!parsedAssetTypes.includes(assetType)) {
+      parsedAssetTypes.push(assetType);
+    }
+  }
+
+  const styleRaw = body.style;
+
+  return {
+    prompt: promptRaw.trim(),
+    style: typeof styleRaw === 'string' && styleRaw.trim() ? styleRaw.trim() : undefined,
+    seed: parseOptionalSeed(body.seed, 'CharacterRequest'),
+    count: parseOptionalCount(body.count),
+    assetTypes: parsedAssetTypes,
+  };
+};
+
+const sanitizeRegenerateRequest = (payload: unknown): RegenerateAssetRequest => {
+  const body = (payload ?? {}) as Record<string, unknown>;
+  const jobIdRaw = body.jobId;
+  const fileIdRaw = body.fileId;
+  const assetTypeRaw = body.assetType;
+
+  if (typeof jobIdRaw !== 'string' || !jobIdRaw.trim()) {
+    throw createBadRequestError('Invalid RegenerateAssetRequest payload.', {
+      required: ['jobId', 'fileId', 'assetType'],
+      reason: 'jobId must be provided',
+    });
+  }
+
+  if (typeof fileIdRaw !== 'string' || !fileIdRaw.trim()) {
+    throw createBadRequestError('Invalid RegenerateAssetRequest payload.', {
+      required: ['jobId', 'fileId', 'assetType'],
+      reason: 'fileId must be provided',
+    });
+  }
+
+  if (typeof assetTypeRaw !== 'string' || !VALID_ASSET_TYPE_SET.has(assetTypeRaw as AssetType)) {
+    throw createBadRequestError('Invalid RegenerateAssetRequest payload.', {
+      required: ['jobId', 'fileId', 'assetType'],
+      reason: 'assetType must be one of the allowed values',
+      allowed: VALID_ASSET_TYPES,
+    });
+  }
+
+  const promptOverrideRaw = body.promptOverride;
+
+  return {
+    jobId: jobIdRaw.trim(),
+    fileId: fileIdRaw.trim(),
+    assetType: assetTypeRaw as AssetType,
+    promptOverride:
+      typeof promptOverrideRaw === 'string' && promptOverrideRaw.trim()
+        ? promptOverrideRaw.trim()
+        : undefined,
+    seed: parseOptionalSeed(body.seed, 'RegenerateAssetRequest'),
+  };
+};
 
 router.post('/generate', async (req, res, next) => {
   try {
-    const payload = req.body as CharacterRequest;
-
-    if (!payload?.prompt || !Array.isArray(payload.assetTypes) || payload.assetTypes.length === 0) {
-      const error = new Error('Invalid CharacterRequest payload.') as Error & {
-        statusCode?: number;
-        details?: unknown;
-      };
-      error.statusCode = 400;
-      error.details = {
-        required: ['prompt', 'assetTypes'],
-      };
-      throw error;
-    }
-
+    const payload = sanitizeCharacterRequest(req.body);
     const job = await createGenerationJob(payload);
     res.status(201).json(job);
   } catch (error) {
@@ -33,20 +149,7 @@ router.post('/generate', async (req, res, next) => {
 
 router.post('/regenerate', async (req, res, next) => {
   try {
-    const payload = req.body as RegenerateAssetRequest;
-
-    if (!payload?.jobId || !payload?.fileId || !payload?.assetType) {
-      const error = new Error('Invalid RegenerateAssetRequest payload.') as Error & {
-        statusCode?: number;
-        details?: unknown;
-      };
-      error.statusCode = 400;
-      error.details = {
-        required: ['jobId', 'fileId', 'assetType'],
-      };
-      throw error;
-    }
-
+    const payload = sanitizeRegenerateRequest(req.body);
     const file = await regenerateAsset(payload);
     res.status(200).json(file);
   } catch (error) {

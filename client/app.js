@@ -9,7 +9,7 @@ const generateBtn = document.querySelector('#generate-btn');
 let currentJob = null;
 
 const escapeHtml = (text) =>
-  text
+  String(text)
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
@@ -37,10 +37,13 @@ const renderJob = (job) => {
   if (!jobMeta || !assetList || !jobSection) return;
 
   jobSection.classList.remove('hidden');
+  const countInfo = Number.isInteger(job?.metadata?.count) ? Number(job.metadata.count) : 1;
+
   jobMeta.innerHTML = `
     <p><strong>Job-ID:</strong> <code>${escapeHtml(job.id)}</code></p>
     <p><strong>Status:</strong> ${escapeHtml(job.status)}</p>
     <p><strong>Erstellt:</strong> ${new Date(job.metadata.generatedAt).toLocaleString('de-DE')}</p>
+    <p><strong>Varianten pro Typ:</strong> ${escapeHtml(countInfo)}</p>
   `;
 
   assetList.innerHTML = '';
@@ -51,9 +54,15 @@ const renderJob = (job) => {
     const imageMarkup = file.error
       ? `<p class="asset-error"><strong>Fehler:</strong> ${escapeHtml(file.error)}</p>`
       : `<img class="asset-image" src="${escapeHtml(file.url)}" alt="${escapeHtml(file.type)} preview" loading="lazy" />`;
+
+    const variantMarkup = Number.isInteger(file.variant)
+      ? `<p><strong>Variante:</strong> ${escapeHtml(file.variant)}</p>`
+      : '';
+
     item.innerHTML = `
       <div class="asset-details">
         <h3>${escapeHtml(file.type)}</h3>
+        ${variantMarkup}
         <p><strong>Datei:</strong> ${escapeHtml(file.filename)}</p>
         <p><strong>ID:</strong> <code>${escapeHtml(file.id)}</code></p>
         ${imageMarkup}
@@ -71,7 +80,7 @@ const regenerate = async (file) => {
   if (!currentJob || !generateBtn) return;
 
   const promptOverride = window.prompt(
-    `Optional neuen Prompt für ${file.type} eingeben:`,
+    `Optional neuen Prompt fur ${file.type} eingeben:`,
     currentJob.request.prompt,
   );
 
@@ -119,6 +128,7 @@ if (form && result && generateBtn) {
     const prompt = String(formData.get('prompt') ?? '').trim();
     const style = String(formData.get('style') ?? '').trim();
     const seedText = String(formData.get('seed') ?? '').trim();
+    const countText = String(formData.get('count') ?? '').trim();
     const assetTypes = formData.getAll('assetTypes').map(String);
 
     if (!prompt || assetTypes.length === 0) {
@@ -126,15 +136,22 @@ if (form && result && generateBtn) {
       return;
     }
 
+    const parsedCount = countText ? Number(countText) : 1;
+    if (!Number.isInteger(parsedCount) || parsedCount < 1 || parsedCount > 8) {
+      setStatus('Bitte eine Variantenanzahl zwischen 1 und 8 eingeben.', 'error');
+      return;
+    }
+
     const payload = {
       prompt,
       style: style || undefined,
       seed: seedText ? Number(seedText) : undefined,
+      count: parsedCount,
       assetTypes,
     };
 
     generateBtn.disabled = true;
-    setStatus('Generierung läuft ...', 'info');
+    setStatus('Generierung lauft ...', 'info');
     result.textContent = 'Lade...';
 
     try {

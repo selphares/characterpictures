@@ -11,7 +11,7 @@
       <header class="header">
         <h1>Character Pictures</h1>
         <p>
-          Vollständiges Demo-Frontend für Prompt, Stil, Seed, Asset-Auswahl und
+          Vollstandiges Demo-Frontend fur Prompt, Stil, Seed, Asset-Auswahl, Variantenanzahl und
           Regeneration einzelner Assets.
         </p>
       </header>
@@ -34,6 +34,10 @@
           <div>
             <label for="seed">Seed (optional)</label>
             <input id="seed" name="seed" type="number" min="0" step="1" placeholder="42" />
+          </div>
+          <div>
+            <label for="count">Varianten pro Asset</label>
+            <input id="count" name="count" type="number" min="1" max="8" step="1" value="1" />
           </div>
         </div>
 

@@ -24,6 +24,7 @@ export interface RegenerateAssetRequest {
 export interface GeneratedFileInfo {
   id: string;
   type: AssetType;
+  variant?: number;
   filename: string;
   mimeType: string;
   bytes: number;
@@ -36,6 +37,7 @@ export interface OutputMetadata {
   prompt: string;
   style?: string;
   seed?: number;
+  count?: number;
   model?: string;
   generatedAt: string;
   durationMs?: number;
