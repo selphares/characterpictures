@@ -48,11 +48,15 @@ const renderJob = (job) => {
   for (const file of job.files) {
     const item = document.createElement('li');
     item.className = 'asset-item';
+    const imageMarkup = file.error
+      ? `<p class="asset-error"><strong>Fehler:</strong> ${escapeHtml(file.error)}</p>`
+      : `<img class="asset-image" src="${escapeHtml(file.url)}" alt="${escapeHtml(file.type)} preview" loading="lazy" />`;
     item.innerHTML = `
-      <div>
+      <div class="asset-details">
         <h3>${escapeHtml(file.type)}</h3>
         <p><strong>Datei:</strong> ${escapeHtml(file.filename)}</p>
         <p><strong>ID:</strong> <code>${escapeHtml(file.id)}</code></p>
+        ${imageMarkup}
       </div>
       <button type="button" data-file-id="${escapeHtml(file.id)}" data-asset-type="${escapeHtml(file.type)}">Neu generieren</button>
     `;

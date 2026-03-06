@@ -133,6 +133,26 @@ button:disabled {
   margin: 0.15rem 0;
 }
 
+
+.asset-details {
+  flex: 1;
+}
+
+.asset-image {
+  margin-top: 0.6rem;
+  width: min(320px, 100%);
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(2, 6, 23, 0.8);
+}
+
+.asset-error {
+  color: #fca5a5;
+  margin-top: 0.5rem;
+}
+
 pre {
   margin: 0;
   background: rgba(2, 6, 23, 0.8);
