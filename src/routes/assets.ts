@@ -1,6 +1,9 @@
+import path from 'node:path';
+
 import { Router } from 'express';
 
 import { createGenerationJob, regenerateAsset } from '../lib/generation.js';
+import { getOutputsDir } from '../lib/storage.js';
 import { CharacterRequest, RegenerateAssetRequest } from '../types.js';
 
 const router = Router();
@@ -46,6 +49,16 @@ router.post('/regenerate', async (req, res, next) => {
 
     const file = await regenerateAsset(payload);
     res.status(200).json(file);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/files/:filename', (req, res, next) => {
+  try {
+    const filename = path.basename(req.params.filename);
+    const absoluteFile = path.join(getOutputsDir(), filename);
+    res.sendFile(absoluteFile);
   } catch (error) {
     next(error);
   }

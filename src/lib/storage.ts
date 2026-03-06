@@ -9,9 +9,20 @@ export async function ensureOutputsDir(): Promise<string> {
   return absoluteDir;
 }
 
+export function getOutputsDir(): string {
+  return path.resolve(process.cwd(), OUTPUTS_DIR);
+}
+
 export async function saveJson(filename: string, data: unknown): Promise<string> {
   const outputDir = await ensureOutputsDir();
   const target = path.join(outputDir, `${filename}.json`);
   await writeFile(target, JSON.stringify(data, null, 2), "utf-8");
+  return target;
+}
+
+export async function saveBinary(filename: string, data: Buffer): Promise<string> {
+  const outputDir = await ensureOutputsDir();
+  const target = path.join(outputDir, filename);
+  await writeFile(target, data);
   return target;
 }
