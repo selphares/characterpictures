@@ -3,84 +3,181 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Character Pictures</title>
+    <title>RPG Maker MZ Character Asset Generator</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main class="app">
-      <header class="header">
-        <h1>Character Pictures</h1>
-        <p>
-          Demo-Frontend fur Prompt, Stil, Profil, strikte Format-Hinweise, Asset-Auswahl,
-          Variantenanzahl und Regeneration einzelner Assets.
-        </p>
-      </header>
-
-      <form id="generator-form" class="panel">
-        <label for="prompt">Prompt</label>
-        <textarea
-          id="prompt"
-          name="prompt"
-          rows="3"
-          required
-          placeholder="z. B. Junge Wissenschaftlerin mit weissem Bob-Haarschnitt in weisser Tech-Jacke"
-        ></textarea>
-
-        <div class="row">
-          <div>
-            <label for="style">Style (optional)</label>
-            <input id="style" name="style" type="text" placeholder="anime, pixel art, clean lineart" />
+    <main class="app-shell">
+      <header class="hero panel">
+        <div class="hero-copy">
+          <p class="eyebrow">RPG Maker MZ Character Asset Generator</p>
+          <h1>Lokales Produktionstool fur komplette Charakter-Sets</h1>
+          <p class="hero-text">
+            Erzeuge ein konsistentes Asset-Set mit 9-Frame-Walking-Loops, SV-Battler-Idle,
+            SV-Battler-Attack, Faceset, Portrait und Fullbody-Referenz direkt serverseitig uber
+            OpenAI oder Google Gemini.
+          </p>
+        </div>
+        <div class="hero-stats">
+          <div class="stat-card">
+            <strong>9</strong>
+            <span>Pflicht-Assets pro Set</span>
           </div>
-          <div>
-            <label for="profile">Profil</label>
-            <select id="profile" name="profile">
-              <option value="jrpg_assets" selected>JRPG Assets (empfohlen)</option>
-              <option value="illustration">Illustration</option>
-            </select>
+          <div class="stat-card">
+            <strong>2</strong>
+            <span>Bildprovider</span>
           </div>
-          <div>
-            <label for="seed">Seed (optional)</label>
-            <input id="seed" name="seed" type="number" min="0" step="1" placeholder="42" />
-          </div>
-          <div>
-            <label for="count">Varianten pro Asset</label>
-            <input id="count" name="count" type="number" min="1" max="8" step="1" value="1" />
+          <div class="stat-card">
+            <strong>JSON</strong>
+            <span>Metadata pro Lauf</span>
           </div>
         </div>
+      </header>
 
-        <label for="formatNotes">Format-Hinweise (optional, aber sehr hilfreich)</label>
-        <textarea
-          id="formatNotes"
-          name="formatNotes"
-          rows="2"
-          placeholder="z. B. Token mit transparenten Ecken; Portrait nicht naher als Brustbereich; Character immer komplett sichtbar"
-        ></textarea>
-
-        <fieldset>
-          <legend>Asset-Typen</legend>
-          <div class="checkbox-grid">
-            <label><input type="checkbox" name="assetTypes" value="character" checked /> Character</label>
-            <label><input type="checkbox" name="assetTypes" value="avatar" checked /> Avatar</label>
-            <label><input type="checkbox" name="assetTypes" value="portrait" checked /> Portrait</label>
-            <label><input type="checkbox" name="assetTypes" value="token" checked /> Token</label>
-            <label><input type="checkbox" name="assetTypes" value="background" /> Background</label>
+      <section class="workspace">
+        <section class="panel form-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">A. Form Panel</p>
+              <h2>Generate Full Set</h2>
+            </div>
+            <div class="asset-pill-list" aria-label="Vordefinierte Asset-Typen">
+              <span>walk_down</span>
+              <span>walk_left</span>
+              <span>walk_right</span>
+              <span>walk_up</span>
+              <span>battler</span>
+              <span>battler_attack</span>
+              <span>faces</span>
+              <span>portrait</span>
+              <span>base_fullbody</span>
+            </div>
           </div>
-        </fieldset>
 
-        <button id="generate-btn" type="submit">Assets generieren</button>
-      </form>
+          <form id="generator-form" class="generator-form">
+            <div class="field-grid field-grid-tight">
+              <label class="field">
+                <span>Charaktername</span>
+                <input
+                  id="characterName"
+                  name="characterName"
+                  type="text"
+                  required
+                  placeholder="Android Astra"
+                />
+              </label>
+              <label class="field">
+                <span>Zielordnername (optional)</span>
+                <input
+                  id="outputDirName"
+                  name="outputDirName"
+                  type="text"
+                  placeholder="android-astra"
+                />
+              </label>
+            </div>
 
-      <p id="status" class="status" aria-live="polite"></p>
+            <label class="field">
+              <span>Hauptbeschreibung</span>
+              <textarea
+                id="description"
+                name="description"
+                rows="5"
+                required
+                placeholder="female android, short silver bob haircut, green eyes, black futuristic bodysuit, white sci-fi coat with gold trim"
+              ></textarea>
+            </label>
 
-      <section id="job-section" class="panel hidden" aria-live="polite">
-        <h2>Generierter Job</h2>
-        <div class="job-meta" id="job-meta"></div>
-        <ul id="asset-list" class="asset-list"></ul>
+            <div class="field-grid">
+              <label class="field">
+                <span>Stilbeschreibung</span>
+                <textarea
+                  id="style"
+                  name="style"
+                  rows="3"
+                  placeholder="anime JRPG style, clean cel shading, crisp linework"
+                ></textarea>
+              </label>
+              <label class="field">
+                <span>Zusatzhinweise</span>
+                <textarea
+                  id="notes"
+                  name="notes"
+                  rows="3"
+                  placeholder="calm expression, no extra props, same coat in every asset"
+                ></textarea>
+              </label>
+            </div>
+
+            <div class="field-grid field-grid-tight">
+              <label class="field field-compact">
+                <span>Bildprovider</span>
+                <select id="provider" name="provider"></select>
+                <small id="provider-hint" class="field-hint">Provider wird geladen ...</small>
+              </label>
+              <label class="field field-compact">
+                <span>Seed (optional)</span>
+                <input id="seed" name="seed" type="number" min="0" step="1" placeholder="42" />
+              </label>
+            </div>
+
+            <button id="generate-btn" class="primary-button" type="submit">Generate Full Set</button>
+          </form>
+        </section>
+
+        <aside class="sidebar">
+          <section class="panel status-panel">
+            <div class="panel-heading compact-heading">
+              <div>
+                <p class="eyebrow">E. Progress / Feedback</p>
+                <h2>Status</h2>
+              </div>
+            </div>
+            <div id="status-box" class="status-box" data-kind="idle">
+              <p id="status-message">Bereit fur die nachste Generierung.</p>
+              <p id="status-detail">Der Server speichert jedes Set in einem eigenen Output-Ordner.</p>
+            </div>
+          </section>
+
+          <section class="panel outputs-panel">
+            <div class="panel-heading compact-heading">
+              <div>
+                <p class="eyebrow">History</p>
+                <h2>Vorhandene Outputs</h2>
+              </div>
+              <button id="refresh-outputs" class="ghost-button" type="button">Aktualisieren</button>
+            </div>
+            <div id="outputs-list" class="outputs-list"></div>
+          </section>
+        </aside>
       </section>
 
-      <section class="panel">
-        <h2>Rohdaten</h2>
-        <pre id="result" aria-live="polite"></pre>
+      <section id="actions-panel" class="panel hidden">
+        <div class="panel-heading compact-heading">
+          <div>
+            <p class="eyebrow">C. Asset Actions</p>
+            <h2>Einzelne Assets neu generieren</h2>
+          </div>
+        </div>
+        <div id="asset-actions" class="action-grid"></div>
+      </section>
+
+      <section id="preview-panel" class="panel hidden">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">D. Output / Preview</p>
+            <h2 id="preview-title">Aktuelles Set</h2>
+          </div>
+        </div>
+        <div id="job-meta" class="meta-grid"></div>
+        <div id="asset-list" class="asset-grid"></div>
+      </section>
+
+      <section class="panel debug-panel">
+        <details>
+          <summary>Rohdaten</summary>
+          <pre id="result" aria-live="polite"></pre>
+        </details>
       </section>
     </main>
 

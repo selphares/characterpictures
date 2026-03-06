@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
-Write-Host "Setze ExecutionPolicy für den aktuellen User ..." -ForegroundColor Cyan
+Write-Host "Setze ExecutionPolicy fuer den aktuellen User ..." -ForegroundColor Cyan
 try {
   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
 } catch {
@@ -15,9 +15,9 @@ try {
 if (-not (Test-Path ".env")) {
   if (Test-Path ".env.example") {
     Copy-Item ".env.example" ".env"
-    Write-Host "'.env' wurde aus '.env.example' erstellt. Bitte OPENAI_API_KEY in .env eintragen." -ForegroundColor Yellow
+    Write-Host "'.env' wurde aus '.env.example' erstellt. Bitte OPENAI_API_KEY und/oder GOOGLE_API_KEY in .env eintragen." -ForegroundColor Yellow
   } else {
-    Write-Host "Keine .env gefunden. Bitte eine .env mit OPENAI_API_KEY erstellen." -ForegroundColor Yellow
+    Write-Host "Keine .env gefunden. Bitte eine .env mit OPENAI_API_KEY und/oder GOOGLE_API_KEY erstellen." -ForegroundColor Yellow
   }
 }
 
@@ -26,7 +26,7 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
 }
 
 if (-not (Test-Path "node_modules")) {
-  Write-Host "Installiere Abhängigkeiten ..." -ForegroundColor Cyan
+  Write-Host "Installiere Abhaengigkeiten ..." -ForegroundColor Cyan
   npm install
 }
 

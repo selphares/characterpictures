@@ -1,202 +1,89 @@
 import {
+  ALL_ASSET_TYPES,
   AssetType,
   CharacterRequest,
   GeneratedFileInfo,
   GenerationJob,
-  GenerationProfile,
+  JobStatus,
   OutputMetadata,
   RegenerateAssetRequest,
 } from '../types.js';
-import { normalizeOutputFilename } from './output-normalizer.js';
-import { generateImageWithOpenAi } from './openai-images.js';
-import { saveBinary } from './storage.js';
+import { createOutputMetadata, replaceFileInMetadata } from './metadata.js';
+import {
+  generateImage,
+  getImageGenerationContext,
+  ImageReference,
+  resolveImageProvider,
+} from './image-service.js';
+import {
+  getConsistencyAnchorFilename,
+  planAssets,
+  planConsistencyAnchor,
+} from './prompts.js';
+import {
+  createOutputFolder,
+  readBinary,
+  readMetadata,
+  saveBinary,
+  saveMetadata,
+} from './storage.js';
 
 const randomId = () => Math.random().toString(36).slice(2, 10);
-const MAX_ASSET_COUNT = 8;
-const DEFAULT_PROFILE: GenerationProfile = 'jrpg_assets';
+const MAX_REFERENCE_IMAGES = 3;
+const ANCHOR_REFERENCE_ID = 'consistency_anchor' as const;
 
-type ImageSize = '1024x1024' | '1024x1536' | '1536x1024' | 'auto';
-type ImageBackground = 'transparent' | 'opaque' | 'auto';
+type ReferenceId = AssetType | typeof ANCHOR_REFERENCE_ID;
 
-interface AssetConfig {
-  size: ImageSize;
-  background: ImageBackground;
-  instruction: string;
+const GENERATION_PRIORITY: AssetType[] = [
+  'base_fullbody',
+  'portrait',
+  'faces',
+  'walk_down',
+  'walk_left',
+  'walk_right',
+  'walk_up',
+  'battler',
+  'battler_attack',
+];
+
+const GENERATION_PRIORITY_INDEX = new Map(
+  GENERATION_PRIORITY.map((assetType, index) => [assetType, index]),
+);
+
+interface BufferedReferenceImage extends ImageReference {
+  referenceId: ReferenceId;
 }
 
-interface ProfileConfig {
-  styleGuide: string;
-  rules: string[];
-  assets: Record<AssetType, AssetConfig>;
-}
-
-const PROFILE_CONFIG: Record<GenerationProfile, ProfileConfig> = {
-  illustration: {
-    styleGuide:
-      'High-quality digital illustration with clean composition and clear subject readability.',
-    rules: [
-      'Generate exactly one image.',
-      'No text, logos, watermark, or signature.',
-      'Keep character identity consistent across all non-background assets in this job.',
-      'Use one character only for character/avatar/portrait/token outputs.',
-    ],
-    assets: {
-      character: {
-        size: '1024x1536',
-        background: 'transparent',
-        instruction:
-          'Full-body character art, standing pose, complete silhouette visible from head to toe, centered composition.',
-      },
-      avatar: {
-        size: '1024x1024',
-        background: 'transparent',
-        instruction:
-          'Head-and-shoulders avatar, face centered, clean framing, maintain same hairstyle and outfit colors as character art.',
-      },
-      portrait: {
-        size: '1024x1536',
-        background: 'transparent',
-        instruction:
-          'Detailed portrait from chest up with expressive face, maintain the same character design and outfit details.',
-      },
-      token: {
-        size: '1024x1024',
-        background: 'transparent',
-        instruction:
-          'Token-ready composition with a clear circular safe area around the character and transparent corners.',
-      },
-      background: {
-        size: '1536x1024',
-        background: 'opaque',
-        instruction: 'Wide scenic environment background, no characters, no text.',
-      },
-    },
-  },
-  jrpg_assets: {
-    styleGuide:
-      '2D JRPG-style game asset look, clean anime line art, crisp cel shading, production-ready readability.',
-    rules: [
-      'Generate exactly one image.',
-      'No text, logos, watermark, signature, or UI elements.',
-      'Keep exactly the same character identity across character/avatar/portrait/token assets: same face, hair, outfit, accessories, and color palette.',
-      'Use one character only for character/avatar/portrait/token outputs.',
-      'Use practical game-ready clothing unless the user prompt explicitly requests otherwise.',
-    ],
-    assets: {
-      character: {
-        size: '1024x1536',
-        background: 'transparent',
-        instruction:
-          'Single full-body character source asset, neutral standing pose, front-facing, complete silhouette visible with small empty margin around body.',
-      },
-      avatar: {
-        size: '1024x1024',
-        background: 'transparent',
-        instruction:
-          'Square avatar icon, head and shoulders, centered face, neutral expression, same outfit and colors as character asset.',
-      },
-      portrait: {
-        size: '1024x1536',
-        background: 'transparent',
-        instruction:
-          'Dialogue portrait (upper body to waist), readable facial expression, same design details as the character asset.',
-      },
-      token: {
-        size: '1024x1024',
-        background: 'transparent',
-        instruction:
-          'Round token-ready framing with subject centered in circular safe area, transparent outside area, same character design.',
-      },
-      background: {
-        size: '1536x1024',
-        background: 'opaque',
-        instruction:
-          'JRPG environment background only, no characters, no creatures, no text, clean playable scene composition.',
-      },
-    },
-  },
-};
-
-const clampCount = (count: number | undefined): number => {
-  if (!Number.isInteger(count)) {
-    return 1;
-  }
-
-  return Math.max(1, Math.min(Number(count), MAX_ASSET_COUNT));
-};
-
-const normalizeProfile = (profile: GenerationProfile | undefined): GenerationProfile => {
-  return profile ?? DEFAULT_PROFILE;
-};
-
-const normalizeFormatNotes = (formatNotes: string | undefined): string | undefined => {
-  if (!formatNotes) {
-    return undefined;
-  }
-
-  const trimmed = formatNotes.trim();
+const normalizeOptionalText = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
 };
 
-const normalizeRequest = (request: CharacterRequest): CharacterRequest => {
+const normalizeAssetTypes = (assetTypes: AssetType[] | undefined): AssetType[] => {
+  if (!assetTypes || assetTypes.length === 0) {
+    return [...ALL_ASSET_TYPES];
+  }
+
+  return [...new Set(assetTypes)];
+};
+
+const normalizeCharacterRequest = (request: CharacterRequest): CharacterRequest => {
   return {
-    ...request,
-    profile: normalizeProfile(request.profile),
-    formatNotes: normalizeFormatNotes(request.formatNotes),
+    characterName: request.characterName.trim(),
+    description: request.description.trim(),
+    style: normalizeOptionalText(request.style),
+    notes: normalizeOptionalText(request.notes),
+    outputDirName: normalizeOptionalText(request.outputDirName),
+    seed: request.seed,
+    provider: resolveImageProvider(request.provider),
+    assetTypes: normalizeAssetTypes(request.assetTypes),
   };
 };
 
-const buildFileInfo = (type: AssetType, variant?: number): GeneratedFileInfo => {
-  const id = randomId();
-  const variantSuffix = variant ? `-v${String(variant).padStart(2, '0')}` : '';
-  const basename = `${type}${variantSuffix}-${id}`;
-
-  return {
-    id,
-    type,
-    variant,
-    filename: `${basename}.png`,
-    mimeType: 'image/png',
-    bytes: 0,
-    url: `/api/assets/files/${basename}.png`,
-    createdAt: new Date().toISOString(),
-  };
-};
-
-const buildAssetPrompt = (
-  request: CharacterRequest,
-  assetType: AssetType,
-  variant: number,
-  totalVariants: number,
-): string => {
-  const profile = normalizeProfile(request.profile);
-  const profileConfig = PROFILE_CONFIG[profile];
-  const assetConfig = profileConfig.assets[assetType];
-
-  const promptSections: string[] = [
-    `Subject brief: ${request.prompt}.`,
-    `Profile style: ${profileConfig.styleGuide}`,
-    `Asset target: ${assetConfig.instruction}`,
-    `Rules: ${profileConfig.rules.join(' ')}`,
-  ];
-
-  if (request.style) {
-    promptSections.push(`Additional style preference: ${request.style}.`);
-  }
-
-  if (request.formatNotes) {
-    promptSections.push(
-      `Mandatory format requirements from user: ${request.formatNotes}. Follow these requirements strictly if they do not conflict with safety rules.`,
-    );
-  }
-
-  if (totalVariants > 1) {
-    promptSections.push(
-      `Variant ${variant} of ${totalVariants}: keep core character identity unchanged and vary only camera angle, expression, or pose within the requested asset format.`,
-    );
-  }
-
-  return promptSections.join('\n');
+const sortAssetTypesForGeneration = (assetTypes: AssetType[]): AssetType[] => {
+  return [...assetTypes].sort((left, right) => {
+    return (GENERATION_PRIORITY_INDEX.get(left) ?? 999) - (GENERATION_PRIORITY_INDEX.get(right) ?? 999);
+  });
 };
 
 const parsePngDimensions = (buffer: Buffer): { width: number; height: number } | undefined => {
@@ -215,93 +102,351 @@ const parsePngDimensions = (buffer: Buffer): { width: number; height: number } |
   };
 };
 
-const writeGeneratedAsset = async (
-  fileInfo: GeneratedFileInfo,
-  prompt: string,
-  size: ImageSize,
-  background: ImageBackground,
-): Promise<GeneratedFileInfo> => {
-  const imageBuffer = await generateImageWithOpenAi({ prompt, size, background });
-  const outputFilename = normalizeOutputFilename(fileInfo.filename.replace(/\.png$/i, ''));
-  const finalName = `${outputFilename}.png`;
-  await saveBinary(finalName, imageBuffer);
+const buildStatusFromFiles = (files: GeneratedFileInfo[]): JobStatus => {
+  const generatedCount = files.filter((file) => file.status === 'generated').length;
 
+  if (generatedCount === files.length) {
+    return 'completed';
+  }
+
+  if (generatedCount > 0) {
+    return 'partial';
+  }
+
+  return 'failed';
+};
+
+const buildGeneratedFileInfo = (
+  folderName: string,
+  assetType: AssetType,
+  filename: string,
+  prompt: string,
+  imageBuffer: Buffer,
+): GeneratedFileInfo => {
   const dimensions = parsePngDimensions(imageBuffer);
 
   return {
-    ...fileInfo,
-    filename: finalName,
+    assetType,
+    filename,
+    mimeType: 'image/png',
     bytes: imageBuffer.byteLength,
     width: dimensions?.width,
     height: dimensions?.height,
-    url: `/api/assets/files/${finalName}`,
+    prompt,
+    url: `/api/output/${folderName}/${filename}`,
+    createdAt: new Date().toISOString(),
+    status: 'generated',
   };
+};
+
+const buildFailedFileInfo = (
+  folderName: string,
+  assetType: AssetType,
+  filename: string,
+  prompt: string,
+  error: string,
+): GeneratedFileInfo => {
+  return {
+    assetType,
+    filename,
+    mimeType: 'image/png',
+    bytes: 0,
+    prompt,
+    url: `/api/output/${folderName}/${filename}`,
+    createdAt: new Date().toISOString(),
+    status: 'failed',
+    error,
+  };
+};
+
+const loadRequestFromMetadata = (
+  metadata: OutputMetadata,
+  request: RegenerateAssetRequest,
+): CharacterRequest => {
+  return {
+    characterName: normalizeOptionalText(request.characterName) ?? metadata.characterName,
+    description: normalizeOptionalText(request.description) ?? metadata.description,
+    style: normalizeOptionalText(request.style) ?? metadata.style,
+    notes: normalizeOptionalText(request.notes) ?? metadata.notes,
+    seed: request.seed ?? metadata.seed,
+    provider: resolveImageProvider(request.provider ?? metadata.provider),
+    assetTypes: [request.assetType],
+  };
+};
+
+const buildReferenceLockedPrompt = (prompt: string, referenceIds: ReferenceId[]): string => {
+  const consistencyRules = [
+    'Consistency lock: this must be the exact same character as the canonical set.',
+    'Preserve the exact same face shape, eye shape, hairstyle, hair color, skin tone, ear shape, tail shape, body proportions, outfit silhouette, accessory placement, and overall palette.',
+    'Do not redesign, reinterpret, age up, stylize differently, swap costume details, or alter proportions.',
+    'If any detail is ambiguous, copy the reference images exactly instead of inventing a variation.',
+  ];
+
+  if (referenceIds.includes(ANCHOR_REFERENCE_ID)) {
+    consistencyRules.push(
+      'The provided consistency anchor turnaround sheet is the single source of truth for the character model. Match it exactly.',
+    );
+  }
+
+  if (referenceIds.includes('portrait')) {
+    consistencyRules.push(
+      'Use the portrait reference only to preserve face detail and expression framing while still obeying the consistency anchor.',
+    );
+  }
+
+  if (referenceIds.includes('battler')) {
+    consistencyRules.push(
+      'Use the battler reference only for combat stance timing and pose language while still obeying the consistency anchor.',
+    );
+  }
+
+  return [
+    prompt,
+    referenceIds.length > 0 ? `Reference assets provided: ${referenceIds.join(', ')}.` : undefined,
+    ...consistencyRules,
+  ]
+    .filter(Boolean)
+    .join('\n');
+};
+
+const createBufferedReference = (
+  referenceId: ReferenceId,
+  filename: string,
+  data: Buffer,
+): BufferedReferenceImage => {
+  return {
+    referenceId,
+    filename,
+    data,
+  };
+};
+
+const buildGenerationReferences = (
+  assetType: AssetType,
+  anchorReference: BufferedReferenceImage | undefined,
+  generatedAssets: Map<AssetType, BufferedReferenceImage>,
+): BufferedReferenceImage[] => {
+  const references: BufferedReferenceImage[] = [];
+
+  if (assetType === 'faces') {
+    const portraitReference = generatedAssets.get('portrait');
+    if (portraitReference) {
+      references.push(portraitReference);
+    }
+  }
+
+  if (assetType === 'battler_attack') {
+    const battlerReference = generatedAssets.get('battler');
+    if (battlerReference) {
+      references.push(battlerReference);
+    }
+  }
+
+  if (anchorReference) {
+    references.push(anchorReference);
+  }
+
+  return references.slice(0, MAX_REFERENCE_IMAGES);
+};
+
+const tryLoadAnchorReference = async (folderName: string): Promise<BufferedReferenceImage | undefined> => {
+  try {
+    const filename = getConsistencyAnchorFilename();
+    const data = await readBinary(folderName, filename);
+    return createBufferedReference(ANCHOR_REFERENCE_ID, filename, data);
+  } catch {
+    return undefined;
+  }
+};
+
+const tryLoadGeneratedAssetReference = async (
+  metadata: OutputMetadata,
+  assetType: AssetType,
+): Promise<BufferedReferenceImage | undefined> => {
+  const file = metadata.files.find(
+    (entry) => entry.assetType === assetType && entry.status === 'generated',
+  );
+
+  if (!file) {
+    return undefined;
+  }
+
+  try {
+    const data = await readBinary(metadata.outputFolder, file.filename);
+    return createBufferedReference(assetType, file.filename, data);
+  } catch {
+    return undefined;
+  }
+};
+
+const buildRegenerationReferences = async (
+  metadata: OutputMetadata,
+  assetType: AssetType,
+): Promise<BufferedReferenceImage[]> => {
+  const references: BufferedReferenceImage[] = [];
+
+  if (assetType === 'faces') {
+    const portraitReference = await tryLoadGeneratedAssetReference(metadata, 'portrait');
+    if (portraitReference) {
+      references.push(portraitReference);
+    }
+  }
+
+  if (assetType === 'battler_attack') {
+    const battlerReference = await tryLoadGeneratedAssetReference(metadata, 'battler');
+    if (battlerReference) {
+      references.push(battlerReference);
+    }
+  }
+
+  const anchorReference = await tryLoadAnchorReference(metadata.outputFolder);
+  if (anchorReference) {
+    references.push(anchorReference);
+  }
+
+  if (references.length === 0) {
+    const fallbackBase = await tryLoadGeneratedAssetReference(metadata, 'base_fullbody');
+    if (fallbackBase) {
+      references.push(fallbackBase);
+    }
+
+    const fallbackPortrait = await tryLoadGeneratedAssetReference(metadata, 'portrait');
+    if (fallbackPortrait && !references.some((reference) => reference.referenceId === 'portrait')) {
+      references.push(fallbackPortrait);
+    }
+  }
+
+  return references.slice(0, MAX_REFERENCE_IMAGES);
+};
+
+const generateAnchorReference = async (
+  folderName: string,
+  request: CharacterRequest,
+  model: string,
+): Promise<BufferedReferenceImage | undefined> => {
+  const plannedAnchor = planConsistencyAnchor(request);
+
+  try {
+    const imageBuffer = await generateImage({
+      provider: request.provider,
+      model,
+      prompt: plannedAnchor.prompt,
+      size: plannedAnchor.size,
+      background: plannedAnchor.background,
+    });
+
+    await saveBinary(folderName, plannedAnchor.filename, imageBuffer);
+    return createBufferedReference(ANCHOR_REFERENCE_ID, plannedAnchor.filename, imageBuffer);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`Failed to generate internal consistency anchor for ${folderName}: ${message}`);
+    return undefined;
+  }
 };
 
 export const createGenerationJob = async (
   inputRequest: CharacterRequest,
 ): Promise<GenerationJob> => {
   const startedAt = Date.now();
-  const request = normalizeRequest(inputRequest);
+  const request = normalizeCharacterRequest(inputRequest);
+  const { provider, model } = getImageGenerationContext(request.provider);
+  request.provider = provider;
+
+  const assetTypes = normalizeAssetTypes(request.assetTypes);
+  const generationOrder = sortAssetTypesForGeneration(assetTypes);
+  const { folderName } = await createOutputFolder(request.characterName, request.outputDirName);
+  const promptVariants: Partial<Record<AssetType, string>> = {};
   const files: GeneratedFileInfo[] = [];
   const errors: NonNullable<GenerationJob['errors']> = [];
-  const variantsPerType = clampCount(request.count);
-  const profileConfig = PROFILE_CONFIG[normalizeProfile(request.profile)];
+  const generatedAssets = new Map<AssetType, BufferedReferenceImage>();
 
-  for (const assetType of request.assetTypes) {
-    const { size, background } = profileConfig.assets[assetType];
+  const anchorReference = await generateAnchorReference(folderName, request, model);
 
-    for (let variant = 1; variant <= variantsPerType; variant += 1) {
-      const fileInfo = buildFileInfo(assetType, variantsPerType > 1 ? variant : undefined);
+  for (const plannedAsset of planAssets(request, generationOrder)) {
+    const referenceImages = buildGenerationReferences(
+      plannedAsset.assetType,
+      anchorReference,
+      generatedAssets,
+    );
+    const finalPrompt = buildReferenceLockedPrompt(
+      plannedAsset.prompt,
+      referenceImages.map((reference) => reference.referenceId),
+    );
 
-      try {
-        files.push(
-          await writeGeneratedAsset(
-            fileInfo,
-            buildAssetPrompt(request, assetType, variant, variantsPerType),
-            size,
-            background,
-          ),
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        files.push({ ...fileInfo, error: message });
-        errors.push({
-          assetType,
-          message:
-            variantsPerType > 1 ? `variant ${variant}/${variantsPerType}: ${message}` : message,
-        });
-      }
+    promptVariants[plannedAsset.assetType] = finalPrompt;
+
+    try {
+      const imageBuffer = await generateImage({
+        provider,
+        model,
+        prompt: finalPrompt,
+        size: plannedAsset.size,
+        background: plannedAsset.background,
+        references: referenceImages.map((reference) => ({
+          filename: reference.filename,
+          data: reference.data,
+        })),
+      });
+
+      await saveBinary(folderName, plannedAsset.filename, imageBuffer);
+      files.push(
+        buildGeneratedFileInfo(
+          folderName,
+          plannedAsset.assetType,
+          plannedAsset.filename,
+          finalPrompt,
+          imageBuffer,
+        ),
+      );
+      generatedAssets.set(
+        plannedAsset.assetType,
+        createBufferedReference(plannedAsset.assetType, plannedAsset.filename, imageBuffer),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      files.push(
+        buildFailedFileInfo(
+          folderName,
+          plannedAsset.assetType,
+          plannedAsset.filename,
+          finalPrompt,
+          message,
+        ),
+      );
+      errors.push({
+        assetType: plannedAsset.assetType,
+        message,
+      });
     }
   }
 
-  const successfulFiles = files.filter((file) => !file.error).length;
-
-  const metadata: OutputMetadata = {
-    prompt: request.prompt,
-    style: request.style,
-    profile: request.profile,
-    formatNotes: request.formatNotes,
-    seed: request.seed,
-    count: variantsPerType,
-    model: 'gpt-image-1',
-    generatedAt: new Date().toISOString(),
+  const status = buildStatusFromFiles(files);
+  const metadata = createOutputMetadata({
+    folderName,
+    request: {
+      ...request,
+      provider,
+      assetTypes,
+    },
+    files,
+    promptVariants,
+    status,
     durationMs: Date.now() - startedAt,
-  };
+    model,
+  });
+
+  await saveMetadata(folderName, metadata);
 
   return {
     id: randomId(),
-    status:
-      successfulFiles === files.length
-        ? 'completed'
-        : successfulFiles > 0
-          ? 'partial'
-          : 'failed',
+    status,
+    folderName,
     request: {
       ...request,
-      count: variantsPerType,
+      provider,
+      assetTypes,
     },
-    files,
+    files: metadata.files,
     metadata,
     errors: errors.length ? errors : undefined,
   };
@@ -309,28 +454,70 @@ export const createGenerationJob = async (
 
 export const regenerateAsset = async (
   request: RegenerateAssetRequest,
-): Promise<GeneratedFileInfo> => {
-  const fileInfo = buildFileInfo(request.assetType);
-  const profile = normalizeProfile(request.profile);
-  const profileConfig = PROFILE_CONFIG[profile];
-  const { size, background } = profileConfig.assets[request.assetType];
+): Promise<GenerationJob> => {
+  const metadata = await readMetadata(request.folderName);
+  const characterRequest = loadRequestFromMetadata(metadata, request);
+  const { provider, model } = getImageGenerationContext(characterRequest.provider);
+  characterRequest.provider = provider;
 
-  const effectivePrompt = request.promptOverride?.trim()
-    ? request.promptOverride.trim()
-    : request.basePrompt?.trim()
-      ? request.basePrompt.trim()
-      : `Create one ${request.assetType} image.`;
+  const plannedAsset = planAssets(characterRequest, [request.assetType], {
+    [request.assetType]: normalizeOptionalText(request.promptOverride),
+  })[0];
+  const referenceImages = await buildRegenerationReferences(metadata, request.assetType);
+  const finalPrompt = buildReferenceLockedPrompt(
+    plannedAsset.prompt,
+    referenceImages.map((reference) => reference.referenceId),
+  );
 
-  const characterRequest: CharacterRequest = {
-    prompt: effectivePrompt,
-    style: request.style,
-    profile,
-    formatNotes: normalizeFormatNotes(request.formatNotes),
-    seed: request.seed,
-    assetTypes: [request.assetType],
+  const imageBuffer = await generateImage({
+    provider,
+    model,
+    prompt: finalPrompt,
+    size: plannedAsset.size,
+    background: plannedAsset.background,
+    references: referenceImages.map((reference) => ({
+      filename: reference.filename,
+      data: reference.data,
+    })),
+  });
+
+  await saveBinary(metadata.outputFolder, plannedAsset.filename, imageBuffer);
+
+  const generatedFile = buildGeneratedFileInfo(
+    metadata.outputFolder,
+    request.assetType,
+    plannedAsset.filename,
+    finalPrompt,
+    imageBuffer,
+  );
+  const filesAfterReplace = metadata.files
+    .filter((file) => file.assetType !== request.assetType)
+    .concat(generatedFile);
+  const status = buildStatusFromFiles(filesAfterReplace);
+  const updatedMetadata = replaceFileInMetadata(
+    {
+      ...metadata,
+      provider,
+      model,
+    },
+    generatedFile,
+    finalPrompt,
+    status,
+  );
+
+  await saveMetadata(metadata.outputFolder, updatedMetadata);
+
+  return {
+    id: randomId(),
+    status,
+    folderName: metadata.outputFolder,
+    request: {
+      ...characterRequest,
+      provider,
+      assetTypes: [...ALL_ASSET_TYPES],
+      outputDirName: metadata.outputFolder,
+    },
+    files: updatedMetadata.files,
+    metadata: updatedMetadata,
   };
-
-  const prompt = buildAssetPrompt(characterRequest, request.assetType, 1, 1);
-
-  return writeGeneratedAsset(fileInfo, prompt, size, background);
 };

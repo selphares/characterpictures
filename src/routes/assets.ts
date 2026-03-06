@@ -1,43 +1,39 @@
-import path from 'node:path';
-
 import { Router } from 'express';
 
+import { getImageProviderCatalog, resolveImageProvider } from '../lib/image-service.js';
 import { createGenerationJob, regenerateAsset } from '../lib/generation.js';
-import { getOutputsDir } from '../lib/storage.js';
+import { deleteOutputFolder, getOutputFilePath, listOutputs, readMetadata } from '../lib/storage.js';
 import {
+  ALL_ASSET_TYPES,
   AssetType,
   CharacterRequest,
-  GenerationProfile,
+  IMAGE_PROVIDERS,
+  ImageProvider,
   RegenerateAssetRequest,
 } from '../types.js';
 
 const router = Router();
-const MAX_COUNT = 8;
-const VALID_ASSET_TYPES: AssetType[] = ['character', 'avatar', 'portrait', 'token', 'background'];
-const VALID_ASSET_TYPE_SET = new Set<AssetType>(VALID_ASSET_TYPES);
-const VALID_PROFILES: GenerationProfile[] = ['illustration', 'jrpg_assets'];
-const VALID_PROFILE_SET = new Set<GenerationProfile>(VALID_PROFILES);
+const VALID_ASSET_TYPE_SET = new Set<AssetType>(ALL_ASSET_TYPES);
+const VALID_PROVIDER_SET = new Set<ImageProvider>(IMAGE_PROVIDERS);
 
-const createBadRequestError = (message: string, details?: unknown) => {
+const createHttpError = (statusCode: number, message: string, details?: unknown) => {
   const error = new Error(message) as Error & { statusCode?: number; details?: unknown };
-  error.statusCode = 400;
+  error.statusCode = statusCode;
   error.details = details;
   return error;
 };
 
-const parseOptionalCount = (value: unknown): number | undefined => {
-  if (value === undefined || value === null || value === '') {
+const createBadRequestError = (message: string, details?: unknown) => {
+  return createHttpError(400, message, details);
+};
+
+const parseOptionalText = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') {
     return undefined;
   }
 
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_COUNT) {
-    throw createBadRequestError('Invalid CharacterRequest payload.', {
-      reason: `count must be an integer between 1 and ${MAX_COUNT}`,
-    });
-  }
-
-  return parsed;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 };
 
 const parseOptionalSeed = (value: unknown, context: 'CharacterRequest' | 'RegenerateAssetRequest') => {
@@ -55,122 +51,113 @@ const parseOptionalSeed = (value: unknown, context: 'CharacterRequest' | 'Regene
   return parsed;
 };
 
-const parseOptionalText = (value: unknown): string | undefined => {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-};
-
-const parseOptionalProfile = (
-  value: unknown,
-  context: 'CharacterRequest' | 'RegenerateAssetRequest',
-): GenerationProfile | undefined => {
+const parseOptionalProvider = (value: unknown, context: 'CharacterRequest' | 'RegenerateAssetRequest') => {
   if (value === undefined || value === null || value === '') {
     return undefined;
   }
 
-  if (typeof value !== 'string' || !VALID_PROFILE_SET.has(value as GenerationProfile)) {
+  if (typeof value !== 'string' || !VALID_PROVIDER_SET.has(value as ImageProvider)) {
     throw createBadRequestError(`Invalid ${context} payload.`, {
-      reason: 'profile contains unsupported value',
-      allowed: VALID_PROFILES,
+      reason: 'provider contains unsupported value',
+      allowed: IMAGE_PROVIDERS,
     });
   }
 
-  return value as GenerationProfile;
+  return value as ImageProvider;
+};
+
+const parseOptionalAssetTypes = (value: unknown): AssetType[] | undefined => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw createBadRequestError('Invalid CharacterRequest payload.', {
+      reason: 'assetTypes must be an array when provided',
+      allowed: ALL_ASSET_TYPES,
+    });
+  }
+
+  const assetTypes: AssetType[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string' || !VALID_ASSET_TYPE_SET.has(entry as AssetType)) {
+      throw createBadRequestError('Invalid CharacterRequest payload.', {
+        reason: 'assetTypes contains unsupported values',
+        allowed: ALL_ASSET_TYPES,
+      });
+    }
+
+    if (!assetTypes.includes(entry as AssetType)) {
+      assetTypes.push(entry as AssetType);
+    }
+  }
+
+  return assetTypes;
 };
 
 const sanitizeCharacterRequest = (payload: unknown): CharacterRequest => {
   const body = (payload ?? {}) as Record<string, unknown>;
-  const promptRaw = body.prompt;
+  const characterName = parseOptionalText(body.characterName);
+  const description = parseOptionalText(body.description);
 
-  if (typeof promptRaw !== 'string' || !promptRaw.trim()) {
+  if (!characterName || !description) {
     throw createBadRequestError('Invalid CharacterRequest payload.', {
-      required: ['prompt', 'assetTypes'],
-      reason: 'prompt must be a non-empty string',
+      required: ['characterName', 'description'],
     });
-  }
-
-  const assetTypesRaw = body.assetTypes;
-  if (!Array.isArray(assetTypesRaw) || assetTypesRaw.length === 0) {
-    throw createBadRequestError('Invalid CharacterRequest payload.', {
-      required: ['prompt', 'assetTypes'],
-      reason: 'assetTypes must be a non-empty array',
-      allowed: VALID_ASSET_TYPES,
-    });
-  }
-
-  const parsedAssetTypes: AssetType[] = [];
-  for (const rawType of assetTypesRaw) {
-    if (typeof rawType !== 'string' || !VALID_ASSET_TYPE_SET.has(rawType as AssetType)) {
-      throw createBadRequestError('Invalid CharacterRequest payload.', {
-        required: ['prompt', 'assetTypes'],
-        reason: 'assetTypes contains unsupported values',
-        allowed: VALID_ASSET_TYPES,
-      });
-    }
-
-    const assetType = rawType as AssetType;
-    if (!parsedAssetTypes.includes(assetType)) {
-      parsedAssetTypes.push(assetType);
-    }
   }
 
   return {
-    prompt: promptRaw.trim(),
+    characterName,
+    description,
     style: parseOptionalText(body.style),
-    profile: parseOptionalProfile(body.profile, 'CharacterRequest'),
-    formatNotes: parseOptionalText(body.formatNotes),
+    notes: parseOptionalText(body.notes),
+    outputDirName: parseOptionalText(body.outputDirName),
+    assetTypes: parseOptionalAssetTypes(body.assetTypes),
+    provider: parseOptionalProvider(body.provider, 'CharacterRequest'),
     seed: parseOptionalSeed(body.seed, 'CharacterRequest'),
-    count: parseOptionalCount(body.count),
-    assetTypes: parsedAssetTypes,
   };
 };
 
 const sanitizeRegenerateRequest = (payload: unknown): RegenerateAssetRequest => {
   const body = (payload ?? {}) as Record<string, unknown>;
-  const jobIdRaw = body.jobId;
-  const fileIdRaw = body.fileId;
-  const assetTypeRaw = body.assetType;
+  const folderName = parseOptionalText(body.folderName);
+  const assetType = parseOptionalText(body.assetType);
 
-  if (typeof jobIdRaw !== 'string' || !jobIdRaw.trim()) {
+  if (!folderName || !assetType) {
     throw createBadRequestError('Invalid RegenerateAssetRequest payload.', {
-      required: ['jobId', 'fileId', 'assetType'],
-      reason: 'jobId must be provided',
+      required: ['folderName', 'assetType'],
+      allowed: ALL_ASSET_TYPES,
     });
   }
 
-  if (typeof fileIdRaw !== 'string' || !fileIdRaw.trim()) {
+  if (!VALID_ASSET_TYPE_SET.has(assetType as AssetType)) {
     throw createBadRequestError('Invalid RegenerateAssetRequest payload.', {
-      required: ['jobId', 'fileId', 'assetType'],
-      reason: 'fileId must be provided',
-    });
-  }
-
-  if (typeof assetTypeRaw !== 'string' || !VALID_ASSET_TYPE_SET.has(assetTypeRaw as AssetType)) {
-    throw createBadRequestError('Invalid RegenerateAssetRequest payload.', {
-      required: ['jobId', 'fileId', 'assetType'],
-      reason: 'assetType must be one of the allowed values',
-      allowed: VALID_ASSET_TYPES,
+      reason: 'assetType contains unsupported value',
+      allowed: ALL_ASSET_TYPES,
     });
   }
 
   return {
-    jobId: jobIdRaw.trim(),
-    fileId: fileIdRaw.trim(),
-    assetType: assetTypeRaw as AssetType,
-    basePrompt: parseOptionalText(body.basePrompt),
-    style: parseOptionalText(body.style),
-    profile: parseOptionalProfile(body.profile, 'RegenerateAssetRequest'),
-    formatNotes: parseOptionalText(body.formatNotes),
+    folderName,
+    assetType: assetType as AssetType,
     promptOverride: parseOptionalText(body.promptOverride),
+    characterName: parseOptionalText(body.characterName),
+    description: parseOptionalText(body.description),
+    style: parseOptionalText(body.style),
+    notes: parseOptionalText(body.notes),
+    provider: parseOptionalProvider(body.provider, 'RegenerateAssetRequest'),
     seed: parseOptionalSeed(body.seed, 'RegenerateAssetRequest'),
   };
 };
 
-router.post('/generate', async (req, res, next) => {
+router.get('/providers', (_req, res) => {
+  res.status(200).json({
+    defaultProvider: resolveImageProvider(undefined),
+    providers: getImageProviderCatalog(),
+  });
+});
+
+router.post('/generate-set', async (req, res, next) => {
   try {
     const payload = sanitizeCharacterRequest(req.body);
     const job = await createGenerationJob(payload);
@@ -180,20 +167,52 @@ router.post('/generate', async (req, res, next) => {
   }
 });
 
-router.post('/regenerate', async (req, res, next) => {
+router.post('/regenerate-asset', async (req, res, next) => {
   try {
     const payload = sanitizeRegenerateRequest(req.body);
-    const file = await regenerateAsset(payload);
-    res.status(200).json(file);
+    const job = await regenerateAsset(payload);
+    res.status(200).json(job);
   } catch (error) {
     next(error);
   }
 });
 
-router.get('/files/:filename', (req, res, next) => {
+router.get('/list-outputs', async (_req, res, next) => {
   try {
-    const filename = path.basename(req.params.filename);
-    const absoluteFile = path.join(getOutputsDir(), filename);
+    const outputs = await listOutputs();
+    res.status(200).json(outputs);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/output/:folder', async (req, res, next) => {
+  try {
+    await deleteOutputFolder(req.params.folder);
+    res.status(200).json({ deleted: true, folderName: req.params.folder });
+  } catch (error) {
+    const maybeNodeError = error as NodeJS.ErrnoException;
+    if (maybeNodeError?.code === 'ENOENT') {
+      next(createHttpError(404, 'Output folder not found.', { folderName: req.params.folder }));
+      return;
+    }
+
+    next(error);
+  }
+});
+
+router.get('/output/:folder/metadata', async (req, res, next) => {
+  try {
+    const metadata = await readMetadata(req.params.folder);
+    res.status(200).json(metadata);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/output/:folder/:file', (req, res, next) => {
+  try {
+    const absoluteFile = getOutputFilePath(req.params.folder, req.params.file);
     res.sendFile(absoluteFile);
   } catch (error) {
     next(error);

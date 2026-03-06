@@ -1,63 +1,129 @@
-# characterpictures
+# RPG Maker MZ Character Asset Generator
 
-Basis-Setup für einen TypeScript-Server mit statischem Frontend.
+Lokale Web-App mit Node.js und TypeScript im Backend sowie einem statischen Frontend fur die serverseitige Generierung eines kompletten RPG Maker MZ Charakter-Asset-Sets.
+
+Unterstuetzte Bildprovider:
+- OpenAI `gpt-image-1.5`
+- Google Gemini Image via Gemini API (`GOOGLE_IMAGE_MODEL`, standardmassig `gemini-3.1-flash-image-preview`)
 
 ## Voraussetzungen
 
 - Node.js 20+
 - npm
-- OpenAI API Key (`OPENAI_API_KEY`)
+- mindestens ein API Key in `.env`
 
-## Schnellstart
+## Installation
 
 ```bash
 npm install
+cp .env.example .env
 npm run dev
 ```
 
-Danach ist die App unter `http://localhost:3000` erreichbar.
+Die App lauft danach unter `http://localhost:3000`.
 
-## OpenAI-Key lokal hinterlegen (ohne jedes Mal `export`)
+## .env Setup
 
-Der Server lädt automatisch eine lokale `.env`-Datei beim Start.
+```env
+OPENAI_API_KEY=<dein-openai-api-key>
+OPENAI_IMAGE_MODEL=gpt-image-1.5
 
-1. Datei anlegen:
-   ```bash
-   cp .env.example .env
-   ```
-2. In `.env` deinen echten Key eintragen:
-   ```env
-   OPENAI_API_KEY=<dein-openai-key>
-   ```
-3. Server normal starten:
-   ```bash
-   npm run dev
-   ```
+GOOGLE_API_KEY=<dein-google-api-key>
+GOOGLE_IMAGE_MODEL=gemini-3.1-flash-image-preview
+```
 
-> Die `.env` ist in `.gitignore` eingetragen und wird nicht ins Repo committed.
+Hinweise:
+- Alternativ zu `GOOGLE_API_KEY` akzeptiert der Server auch `GEMINI_API_KEY`.
+- Beide Keys bleiben strikt serverseitig und werden nie ins Frontend geschrieben.
+- Im UI kann der Bildprovider pro Generierung uber ein Dropdown ausgewahlt werden.
 
-## Windows-Start via BAT + PowerShell
+## Startbefehle
 
-Wenn du alles bequem per Doppelklick starten willst:
+```bash
+npm run dev
+npm run build
+npm run start
+```
 
-- `start-dev.bat` startet `scripts/start-dev.ps1`.
-- Das PowerShell-Skript versucht automatisch:
-  - `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`
-  - Falls das wegen Sicherheitsrichtlinien fehlschlägt, läuft der Start trotzdem weiter.
-- Falls `.env` fehlt, wird sie aus `.env.example` erstellt.
-- Falls `node_modules` fehlt, wird `npm install` ausgeführt.
-- Danach startet `npm run dev`.
+## Generierte Asset-Typen
 
-## OpenAI-Bilderzeugung
+- `walk_down`
+- `walk_left`
+- `walk_right`
+- `walk_up`
+- `battler`
+- `battler_attack`
+- `faces`
+- `portrait`
+- `base_fullbody`
 
-Die Bildgenerierung läuft über den Endpoint `POST /api/assets/generate` und verwendet das Modell `gpt-image-1`.
-Der API-Key wird über `OPENAI_API_KEY` eingelesen (z. B. aus `.env`).
+## Output-Struktur
 
-## Struktur
+Jede Generierung landet in einem eigenen Ordner unter `outputs/`:
 
-- `src/` – Server und Backend-Logik
-- `src/lib/` – Services/Utilities
-- `client/` – Statisches Frontend
-- `outputs/` – Ausgabeordner für generierte Dateien
-- `scripts/start-dev.ps1` – Windows-Helferskript
-- `start-dev.bat` – Starter für PowerShell-Skript
+```text
+outputs/<character-name>-<timestamp>/
+  walk_down.png
+  walk_left.png
+  walk_right.png
+  walk_up.png
+  battler.png
+  battler_attack.png
+  faces.png
+  portrait.png
+  base_fullbody.png
+  metadata.json
+```
+
+`metadata.json` enthalt Charakterdaten, Provider, Modell, Zeitstempel, Status, Dateiliste und die tatsachlich verwendeten Prompt-Varianten pro Asset.
+
+## API-Endpunkte
+
+- `GET /api/providers`
+- `POST /api/generate-set`
+- `POST /api/regenerate-asset`
+- `GET /api/list-outputs`
+- `GET /api/output/:folder/:file`
+- `GET /api/output/:folder/metadata`
+- `GET /api/health`
+
+## Typische Nutzung
+
+1. Charaktername, Hauptbeschreibung, Stil und Zusatzhinweise im Formular eingeben.
+2. Gewunschten Bildprovider im Dropdown auswahlen.
+3. `Generate Full Set` auslosen.
+4. Das erzeugte Set im Preview-Panel pruefen.
+5. Einzelne Assets uber `Neu generieren` oder das Asset-Actions-Panel gezielt erneut erzeugen.
+6. Fruhere Generierungen uber die Output-Liste wieder laden.
+
+## Ordnerstruktur
+
+```text
+client/
+  index.html
+  styles.css
+  app.js
+src/
+  server.ts
+  routes/
+  lib/
+outputs/
+```
+
+## Hinweise
+
+- Die Walking-Assets werden auf 9-Frame-Loops in 3x3-Layouts ausgerichtet.
+- `battler.png` ist als 9-Frame-SV-Idle-Sheet gedacht, `battler_attack.png` als 9-Frame-SV-Attack-Sheet.
+- Die Generierung lauft in einer festen Reihenfolge mit einem internen `consistency_anchor.png` als kanonischem Turnaround-Modellblatt, damit nachfolgende Assets dieselbe Figur konsequent uber Referenzbilder nachziehen.
+- Re-Generate einzelner Assets verwendet den internen Consistency-Anchor und passende bereits vorhandene Set-Bilder wieder als Referenzen, um Gesicht, Outfit und Proportionen enger zusammenzuhalten.
+- OpenAI bietet die praezisere Groessen- und Transparenzsteuerung. Google Gemini wird uber die offizielle Gemini Image Generation API angebunden und setzt Formatwunsche primar uber Prompt-Instruktionen plus Referenzbilder um.
+- Wenn die Bild-API einzelne Parameter oder Referenz-Edits nicht akzeptiert, verwendet der OpenAI-Pfad kompatible Fallbacks.
+
+## Quellen
+
+- [Google Gemini API Image Generation](https://ai.google.dev/gemini-api/docs/image-generation?hl=de#best-practices)
+- [Google Gen AI SDK](https://ai.google.dev/gemini-api/docs/sdks)
+
+
+
+

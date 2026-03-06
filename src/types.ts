@@ -1,63 +1,80 @@
-export type AssetType =
-  | 'character'
-  | 'avatar'
-  | 'portrait'
-  | 'token'
-  | 'background';
+export const ALL_ASSET_TYPES = [
+  'walk_down',
+  'walk_left',
+  'walk_right',
+  'walk_up',
+  'battler',
+  'battler_attack',
+  'faces',
+  'portrait',
+  'base_fullbody',
+] as const;
 
-export type GenerationProfile = 'illustration' | 'jrpg_assets';
+export const IMAGE_PROVIDERS = ['openai', 'google'] as const;
+
+export type AssetType = (typeof ALL_ASSET_TYPES)[number];
+export type ImageProvider = (typeof IMAGE_PROVIDERS)[number];
+
+export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'partial';
 
 export interface CharacterRequest {
-  prompt: string;
+  characterName: string;
+  description: string;
   style?: string;
-  profile?: GenerationProfile;
-  formatNotes?: string;
+  notes?: string;
+  outputDirName?: string;
+  assetTypes?: AssetType[];
+  provider?: ImageProvider;
   seed?: number;
-  assetTypes: AssetType[];
-  count?: number;
 }
 
 export interface RegenerateAssetRequest {
-  jobId: string;
+  folderName: string;
   assetType: AssetType;
-  fileId: string;
-  basePrompt?: string;
-  style?: string;
-  profile?: GenerationProfile;
-  formatNotes?: string;
   promptOverride?: string;
+  characterName?: string;
+  description?: string;
+  style?: string;
+  notes?: string;
+  provider?: ImageProvider;
   seed?: number;
 }
 
 export interface GeneratedFileInfo {
-  id: string;
-  type: AssetType;
-  variant?: number;
+  assetType: AssetType;
   filename: string;
   mimeType: string;
   bytes: number;
   width?: number;
   height?: number;
+  prompt: string;
   url: string;
   createdAt: string;
+  status: 'generated' | 'failed';
   error?: string;
 }
 
 export interface OutputMetadata {
-  prompt: string;
+  characterName: string;
+  description: string;
   style?: string;
-  profile?: GenerationProfile;
-  formatNotes?: string;
+  notes?: string;
   seed?: number;
-  count?: number;
+  provider?: ImageProvider;
   model?: string;
+  outputFolder: string;
   generatedAt: string;
+  updatedAt: string;
+  status: JobStatus;
   durationMs?: number;
+  promptVariants: Partial<Record<AssetType, string>>;
+  files: GeneratedFileInfo[];
 }
 
 export interface GenerationJob {
   id: string;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'partial';
+  status: JobStatus;
+  folderName: string;
   request: CharacterRequest;
   files: GeneratedFileInfo[];
   metadata: OutputMetadata;
@@ -65,4 +82,22 @@ export interface GenerationJob {
     assetType: AssetType;
     message: string;
   }>;
+}
+
+export interface OutputListItem {
+  folderName: string;
+  characterName: string;
+  generatedAt: string;
+  updatedAt: string;
+  status: JobStatus;
+  files: GeneratedFileInfo[];
+}
+
+export interface ImageProviderInfo {
+  id: ImageProvider;
+  label: string;
+  configured: boolean;
+  keyEnvVar: string;
+  model: string;
+  summary: string;
 }
