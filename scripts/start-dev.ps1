@@ -8,7 +8,8 @@ try {
   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
 } catch {
   Write-Host "Hinweis: ExecutionPolicy konnte nicht gesetzt werden ($($_.Exception.Message))." -ForegroundColor Yellow
-  Write-Host "Der Start wird trotzdem fortgesetzt ..." -ForegroundColor Yellow
+  Write-Host "Das ist meist unkritisch (z. B. durch Firmenrichtlinien/GPO blockiert)." -ForegroundColor Yellow
+  Write-Host "Der Start wird trotzdem fortgesetzt und der Dev-Server funktioniert in der Regel." -ForegroundColor Yellow
 }
 
 if (-not (Test-Path ".env")) {

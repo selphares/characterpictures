@@ -41,8 +41,9 @@ Der Server lädt automatisch eine lokale `.env`-Datei beim Start.
 Wenn du alles bequem per Doppelklick starten willst:
 
 - `start-dev.bat` startet `scripts/start-dev.ps1`.
-- Das PowerShell-Skript setzt automatisch:
+- Das PowerShell-Skript versucht automatisch:
   - `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`
+  - Falls das wegen Sicherheitsrichtlinien fehlschlägt, läuft der Start trotzdem weiter.
 - Falls `.env` fehlt, wird sie aus `.env.example` erstellt.
 - Falls `node_modules` fehlt, wird `npm install` ausgeführt.
 - Danach startet `npm run dev`.
