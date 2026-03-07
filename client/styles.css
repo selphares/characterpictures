@@ -67,7 +67,8 @@ summary {
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
-select:focus-visible {
+select:focus-visible,
+label:focus-within {
   box-shadow: 0 0 0 3px rgba(116, 240, 195, 0.2);
 }
 
@@ -279,7 +280,8 @@ img {
 .primary-button,
 .ghost-button,
 .action-button,
-.compact-button {
+.compact-button,
+.upload-button {
   border: none;
   border-radius: 14px;
   cursor: pointer;
@@ -289,7 +291,8 @@ img {
 .primary-button:hover,
 .ghost-button:hover,
 .action-button:hover,
-.compact-button:hover {
+.compact-button:hover,
+.upload-button:hover {
   transform: translateY(-1px);
 }
 
@@ -302,11 +305,18 @@ img {
 }
 
 .ghost-button,
-.compact-button {
+.compact-button,
+.upload-button {
   padding: 11px 16px;
   color: var(--text);
   background: rgba(77, 141, 255, 0.13);
   border: 1px solid rgba(77, 141, 255, 0.18);
+}
+
+.upload-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .status-box {
@@ -498,6 +508,7 @@ img {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+  align-items: start;
 }
 
 .asset-card {
@@ -507,10 +518,16 @@ img {
   border: 1px solid rgba(129, 160, 215, 0.18);
   display: grid;
   gap: 14px;
+  align-content: start;
+  align-self: start;
 }
 
 .asset-card.is-error {
   border-color: rgba(255, 138, 138, 0.3);
+}
+
+.asset-card.is-pending {
+  border-color: rgba(255, 208, 138, 0.26);
 }
 
 .asset-card-head {
@@ -568,6 +585,25 @@ img {
   padding: 18px;
   color: var(--danger);
   text-align: center;
+}
+
+.asset-placeholder-pending {
+  color: var(--warning);
+}
+
+.asset-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.file-input-hidden {
+  width: 0.1px;
+  height: 0.1px;
+  opacity: 0;
+  overflow: hidden;
+  position: absolute;
+  z-index: -1;
 }
 
 .prompt-details {
@@ -669,7 +705,8 @@ img {
     grid-template-columns: 72px minmax(0, 1fr);
   }
 
-  .output-delete-button {
+  .output-delete-button,
+  .upload-button {
     width: 100%;
   }
 
@@ -677,7 +714,10 @@ img {
     width: 72px;
     height: 72px;
   }
-}
 
+  .asset-tools {
+    flex-direction: column;
+  }
+}
 
 

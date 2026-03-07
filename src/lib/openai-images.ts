@@ -5,6 +5,7 @@ const DEFAULT_OPENAI_MODEL = 'gpt-image-1.5';
 export interface OpenAiReferenceImage {
   filename: string;
   data: Buffer;
+  mimeType?: string;
 }
 
 export interface OpenAiImageInput {
@@ -29,9 +30,9 @@ const postImageGeneration = async (
   });
 };
 
-const toPngBlob = (buffer: Buffer): Blob => {
+const toImageBlob = (buffer: Buffer, mimeType = 'image/png'): Blob => {
   const bytes = new Uint8Array(buffer);
-  return new Blob([bytes], { type: 'image/png' });
+  return new Blob([bytes], { type: mimeType });
 };
 
 const postImageEdit = async (
@@ -51,7 +52,11 @@ const postImageEdit = async (
   }
 
   for (const reference of input.references ?? []) {
-    formData.append('image[]', toPngBlob(reference.data), reference.filename);
+    formData.append(
+      'image[]',
+      toImageBlob(reference.data, reference.mimeType ?? 'image/png'),
+      reference.filename,
+    );
   }
 
   return fetch(OPENAI_IMAGES_EDITS_URL, {
@@ -161,4 +166,3 @@ export async function generateImageWithOpenAi(input: OpenAiImageInput): Promise<
 
   return extractImageBuffer(response);
 }
-

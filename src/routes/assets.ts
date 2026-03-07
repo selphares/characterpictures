@@ -1,7 +1,7 @@
 import { Router } from 'express';
 
 import { getImageProviderCatalog, resolveImageProvider } from '../lib/image-service.js';
-import { createGenerationJob, regenerateAsset } from '../lib/generation.js';
+import { createGenerationJob, regenerateAsset, uploadAssetImage } from '../lib/generation.js';
 import { deleteOutputFolder, getOutputFilePath, listOutputs, readMetadata } from '../lib/storage.js';
 import {
   ALL_ASSET_TYPES,
@@ -15,6 +15,9 @@ import {
 const router = Router();
 const VALID_ASSET_TYPE_SET = new Set<AssetType>(ALL_ASSET_TYPES);
 const VALID_PROVIDER_SET = new Set<ImageProvider>(IMAGE_PROVIDERS);
+const SUPPORTED_UPLOAD_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+
+type SupportedUploadMimeType = (typeof SUPPORTED_UPLOAD_MIME_TYPES)[number];
 
 const createHttpError = (statusCode: number, message: string, details?: unknown) => {
   const error = new Error(message) as Error & { statusCode?: number; details?: unknown };
@@ -34,6 +37,21 @@ const parseOptionalText = (value: unknown): string | undefined => {
 
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+};
+
+const parseRequiredText = (
+  value: unknown,
+  field: string,
+  context: 'CharacterRequest' | 'RegenerateAssetRequest' | 'UploadAssetRequest',
+): string => {
+  const parsed = parseOptionalText(value);
+  if (!parsed) {
+    throw createBadRequestError(`Invalid ${context} payload.`, {
+      required: [field],
+    });
+  }
+
+  return parsed;
 };
 
 const parseOptionalSeed = (value: unknown, context: 'CharacterRequest' | 'RegenerateAssetRequest') => {
@@ -150,6 +168,35 @@ const sanitizeRegenerateRequest = (payload: unknown): RegenerateAssetRequest => 
   };
 };
 
+const sanitizeUploadRequest = (payload: unknown) => {
+  const body = (payload ?? {}) as Record<string, unknown>;
+  const folderName = parseRequiredText(body.folderName, 'folderName', 'UploadAssetRequest');
+  const assetType = parseRequiredText(body.assetType, 'assetType', 'UploadAssetRequest');
+  const mimeType = parseRequiredText(body.mimeType, 'mimeType', 'UploadAssetRequest').toLowerCase();
+  const imageBase64 = parseRequiredText(body.imageBase64, 'imageBase64', 'UploadAssetRequest');
+
+  if (!VALID_ASSET_TYPE_SET.has(assetType as AssetType)) {
+    throw createBadRequestError('Invalid UploadAssetRequest payload.', {
+      reason: 'assetType contains unsupported value',
+      allowed: ALL_ASSET_TYPES,
+    });
+  }
+
+  if (!SUPPORTED_UPLOAD_MIME_TYPES.includes(mimeType as SupportedUploadMimeType)) {
+    throw createBadRequestError('Invalid UploadAssetRequest payload.', {
+      reason: 'mimeType contains unsupported value',
+      allowed: SUPPORTED_UPLOAD_MIME_TYPES,
+    });
+  }
+
+  return {
+    folderName,
+    assetType: assetType as AssetType,
+    mimeType: mimeType as SupportedUploadMimeType,
+    imageBuffer: Buffer.from(imageBase64, 'base64'),
+  };
+};
+
 router.get('/providers', (_req, res) => {
   res.status(200).json({
     defaultProvider: resolveImageProvider(undefined),
@@ -171,6 +218,16 @@ router.post('/regenerate-asset', async (req, res, next) => {
   try {
     const payload = sanitizeRegenerateRequest(req.body);
     const job = await regenerateAsset(payload);
+    res.status(200).json(job);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/upload-asset', async (req, res, next) => {
+  try {
+    const payload = sanitizeUploadRequest(req.body);
+    const job = await uploadAssetImage(payload);
     res.status(200).json(job);
   } catch (error) {
     next(error);

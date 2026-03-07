@@ -10,12 +10,15 @@ export const ALL_ASSET_TYPES = [
   'base_fullbody',
 ] as const;
 
-export const IMAGE_PROVIDERS = ['openai', 'google'] as const;
+export const IMAGE_PROVIDERS = ['openai', 'google', 'chatgpt', 'gemini'] as const;
 
 export type AssetType = (typeof ALL_ASSET_TYPES)[number];
 export type ImageProvider = (typeof IMAGE_PROVIDERS)[number];
+export type ImageProviderMode = 'api' | 'manual';
 
-export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'partial';
+export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'partial' | 'draft';
+export type GeneratedFileStatus = 'generated' | 'failed' | 'pending';
+export type GeneratedFileSource = 'api' | 'manual_upload' | 'prompt_plan';
 
 export interface CharacterRequest {
   characterName: string;
@@ -50,7 +53,8 @@ export interface GeneratedFileInfo {
   prompt: string;
   url: string;
   createdAt: string;
-  status: 'generated' | 'failed';
+  status: GeneratedFileStatus;
+  source?: GeneratedFileSource;
   error?: string;
 }
 
@@ -100,4 +104,5 @@ export interface ImageProviderInfo {
   keyEnvVar: string;
   model: string;
   summary: string;
+  mode: ImageProviderMode;
 }

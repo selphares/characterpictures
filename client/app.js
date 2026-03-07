@@ -22,6 +22,9 @@ const ASSET_LABELS = {
   base_fullbody: 'Base Fullbody',
 };
 
+const SUPPORTED_UPLOAD_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+const UPLOAD_ACCEPT = SUPPORTED_UPLOAD_TYPES.join(',');
+
 const form = document.querySelector('#generator-form');
 const generateBtn = document.querySelector('#generate-btn');
 const refreshOutputsBtn = document.querySelector('#refresh-outputs');
@@ -108,6 +111,27 @@ const getPreferredProvider = (providerId) => {
   return configuredProvider?.id || defaultProvider;
 };
 
+const isManualProvider = (providerId) => {
+  return getProviderById(providerId)?.mode === 'manual';
+};
+
+const getCurrentJobProviderId = () => {
+  return currentJob?.request?.provider || currentJob?.metadata?.provider || defaultProvider;
+};
+
+const getCurrentJobProvider = () => {
+  return getProviderById(getCurrentJobProviderId());
+};
+
+const syncGenerateButtonLabel = () => {
+  if (!generateBtn || !providerSelect) {
+    return;
+  }
+
+  const selectedProvider = getProviderById(providerSelect.value);
+  generateBtn.textContent = selectedProvider?.mode === 'manual' ? 'Prompt-Paket erstellen' : 'Generate Full Set';
+};
+
 const updateProviderHint = () => {
   if (!providerHint || !providerSelect) {
     return;
@@ -116,6 +140,13 @@ const updateProviderHint = () => {
   const selectedProvider = getProviderById(providerSelect.value);
   if (!selectedProvider) {
     providerHint.textContent = 'Kein Bildprovider verfugbar.';
+    syncGenerateButtonLabel();
+    return;
+  }
+
+  if (selectedProvider.mode === 'manual') {
+    providerHint.textContent = `${selectedProvider.label} | Kein API-Key erforderlich. ${selectedProvider.summary}`;
+    syncGenerateButtonLabel();
     return;
   }
 
@@ -124,6 +155,7 @@ const updateProviderHint = () => {
     : `nicht konfiguriert, erwartet ${selectedProvider.keyEnvVar}`;
 
   providerHint.textContent = `${selectedProvider.label} | Modell: ${selectedProvider.model} | ${status}. ${selectedProvider.summary}`;
+  syncGenerateButtonLabel();
 };
 
 const renderProviderOptions = (preferredProvider) => {
@@ -135,7 +167,7 @@ const renderProviderOptions = (preferredProvider) => {
   providerSelect.innerHTML = currentProviders
     .map((provider) => {
       const disabled = provider.configured ? '' : 'disabled';
-      const suffix = provider.configured ? '' : ' (Key fehlt)';
+      const suffix = provider.configured || provider.mode === 'manual' ? '' : ' (Key fehlt)';
       return `<option value="${escapeHtml(provider.id)}" ${disabled}>${escapeHtml(provider.label + suffix)}</option>`;
     })
     .join('');
@@ -181,6 +213,37 @@ const buildJobFromMetadata = (metadata) => {
 
 const findFileByAssetType = (job, assetType) => {
   return job?.files?.find((file) => file.assetType === assetType) || null;
+};
+
+const normalizeManualPromptText = (job, prompt) => {
+  const providerId = job?.request?.provider || job?.metadata?.provider;
+  if (!isManualProvider(providerId) || !prompt) {
+    return prompt || '';
+  }
+
+  return String(prompt)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^External target:/i.test(line))
+    .filter((line) => !/^If (ChatGPT|Gemini) asks follow-up questions/i.test(line))
+    .map((line) =>
+      line
+        .replace(
+          /^Before sending this in (ChatGPT|Gemini), attach these local reference images from the current output folder:/i,
+          'Attach these existing reference images before generating:',
+        )
+        .replace(
+          /^No local reference images are available yet\. Start with base_fullbody and portrait first, upload them into this set, then reuse those files as references for the remaining assets\./i,
+          'If possible, create base_fullbody and portrait first, add them to the set, then reuse them as references for the remaining assets.',
+        ),
+    )
+    .join('\n');
+};
+
+const getPromptForAsset = (job, assetType) => {
+  const prompt = findFileByAssetType(job, assetType)?.prompt || job?.metadata?.promptVariants?.[assetType] || '';
+  return normalizeManualPromptText(job, prompt);
 };
 
 const pickOutputPreview = (files) => {
@@ -312,12 +375,15 @@ const renderAssetActions = (job) => {
     return;
   }
 
+  const manualMode = isManualProvider(job.request.provider || job.metadata?.provider);
+  const actionText = manualMode ? 'Prompt aktualisieren' : 'Regenerate';
+
   actionsPanel.classList.remove('hidden');
   assetActions.innerHTML = ASSET_ORDER.map((assetType) => {
     return `
       <button class="action-button" type="button" data-asset-type="${escapeHtml(assetType)}">
         <span>${escapeHtml(assetLabel(assetType))}</span>
-        <small>Regenerate</small>
+        <small>${escapeHtml(actionText)}</small>
       </button>
     `;
   }).join('');
@@ -327,6 +393,43 @@ const renderAssetActions = (job) => {
       const assetType = button.getAttribute('data-asset-type');
       if (assetType) {
         void regenerateAsset(assetType);
+      }
+    });
+  });
+};
+
+const bindAssetCardActions = (job) => {
+  assetList.querySelectorAll('[data-regenerate-asset]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const assetType = button.getAttribute('data-regenerate-asset');
+      if (assetType) {
+        void regenerateAsset(assetType);
+      }
+    });
+  });
+
+  assetList.querySelectorAll('[data-copy-prompt]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const assetType = button.getAttribute('data-copy-prompt');
+      if (assetType) {
+        void copyPromptToClipboard(job, assetType);
+      }
+    });
+  });
+
+  assetList.querySelectorAll('[data-upload-asset]').forEach((input) => {
+    input.addEventListener('change', async (event) => {
+      const assetType = input.getAttribute('data-upload-asset');
+      const file = event.target?.files?.[0];
+
+      if (!assetType || !file) {
+        return;
+      }
+
+      try {
+        await uploadAsset(assetType, file);
+      } finally {
+        event.target.value = '';
       }
     });
   });
@@ -344,11 +447,15 @@ const renderJob = (job) => {
 
   const provider = getProviderById(job.request.provider || job.metadata?.provider || defaultProvider);
   const providerLabel = provider?.label || (job.request.provider || job.metadata?.provider || defaultProvider);
+  const workflowLabel = provider?.mode === 'manual' ? 'Prompt + manueller Upload' : 'Direkte API-Generierung';
+  const manualMode = provider?.mode === 'manual';
+  const regenerateLabel = manualMode ? 'Prompt aktualisieren' : 'Neu generieren';
 
   jobMeta.innerHTML = `
     <div class="meta-card"><span>Ordner</span><strong>${escapeHtml(job.folderName)}</strong></div>
     <div class="meta-card"><span>Status</span><strong>${escapeHtml(job.status)}</strong></div>
     <div class="meta-card"><span>Provider</span><strong>${escapeHtml(providerLabel)}</strong></div>
+    <div class="meta-card"><span>Workflow</span><strong>${escapeHtml(workflowLabel)}</strong></div>
     <div class="meta-card"><span>Modell</span><strong>${escapeHtml(job.metadata.model || 'unbekannt')}</strong></div>
     <div class="meta-card"><span>Erstellt</span><strong>${escapeHtml(formatDate(job.metadata.generatedAt))}</strong></div>
     <div class="meta-card"><span>Aktualisiert</span><strong>${escapeHtml(formatDate(job.metadata.updatedAt))}</strong></div>
@@ -359,21 +466,38 @@ const renderJob = (job) => {
 
   assetList.innerHTML = ASSET_ORDER.map((assetType) => {
     const file = findFileByAssetType(job, assetType);
-    const promptMarkup = file?.prompt
-      ? `<details class="prompt-details"><summary>Verwendeter Prompt</summary><p>${escapeHtml(file.prompt)}</p></details>`
+    const prompt = getPromptForAsset(job, assetType);
+    const promptMarkup = prompt
+      ? `<details class="prompt-details"><summary>Verwendeter Prompt</summary><p>${escapeHtml(prompt)}</p></details>`
       : '';
-    const previewMarkup = file?.status === 'generated'
-      ? `<img class="asset-image" src="${escapeHtml(file.url)}" alt="${escapeHtml(assetLabel(assetType))} Vorschau" loading="lazy" />`
-      : `<div class="asset-placeholder">${file?.error ? escapeHtml(file.error) : 'Noch nicht vorhanden'}</div>`;
+
+    let previewMarkup = '<div class="asset-placeholder">Noch nicht vorhanden</div>';
+    if (file?.status === 'generated') {
+      previewMarkup = `<img class="asset-image" src="${escapeHtml(file.url)}" alt="${escapeHtml(assetLabel(assetType))} Vorschau" loading="lazy" />`;
+    } else if (manualMode && file?.status === 'pending') {
+      previewMarkup = '<div class="asset-placeholder asset-placeholder-pending">Noch kein Bild importiert. Prompt kopieren, extern erzeugen und hier hochladen.</div>';
+    } else if (file?.error) {
+      previewMarkup = `<div class="asset-placeholder">${escapeHtml(file.error)}</div>`;
+    }
+
+    const manualActionsMarkup = manualMode
+      ? `
+        <div class="asset-tools">
+          <button class="ghost-button compact-button" type="button" data-copy-prompt="${escapeHtml(assetType)}">Prompt kopieren</button>
+          <label class="upload-button" for="upload-${escapeHtml(assetType)}">${file?.status === 'generated' ? 'Bild ersetzen' : 'Bild hochladen'}</label>
+          <input id="upload-${escapeHtml(assetType)}" class="file-input-hidden" type="file" accept="${UPLOAD_ACCEPT}" data-upload-asset="${escapeHtml(assetType)}" />
+        </div>
+      `
+      : '';
 
     return `
-      <article class="asset-card ${file?.status === 'failed' ? 'is-error' : ''}">
+      <article class="asset-card ${file?.status === 'failed' ? 'is-error' : ''} ${file?.status === 'pending' ? 'is-pending' : ''}">
         <div class="asset-card-head">
           <div>
             <p class="asset-kicker">${escapeHtml(assetType)}</p>
             <h3>${escapeHtml(assetLabel(assetType))}</h3>
           </div>
-          <button class="ghost-button compact-button" type="button" data-regenerate-asset="${escapeHtml(assetType)}">Neu generieren</button>
+          <button class="ghost-button compact-button" type="button" data-regenerate-asset="${escapeHtml(assetType)}">${escapeHtml(regenerateLabel)}</button>
         </div>
         <div class="asset-meta">
           <span>Datei: ${escapeHtml(file?.filename || `${assetType}.png`)}</span>
@@ -381,20 +505,13 @@ const renderJob = (job) => {
           <span>Status: ${escapeHtml(file?.status || 'missing')}</span>
         </div>
         ${previewMarkup}
+        ${manualActionsMarkup}
         ${promptMarkup}
       </article>
     `;
   }).join('');
 
-  assetList.querySelectorAll('[data-regenerate-asset]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const assetType = button.getAttribute('data-regenerate-asset');
-      if (assetType) {
-        void regenerateAsset(assetType);
-      }
-    });
-  });
-
+  bindAssetCardActions(job);
   renderAssetActions(job);
   renderOutputsList(currentOutputs);
   if (result) {
@@ -433,6 +550,16 @@ const loadOutput = async (folderName) => {
 
   const metadata = await asJson(await fetch(`/api/output/${encodeURIComponent(folderName)}/metadata`));
   renderJob(buildJobFromMetadata(metadata));
+
+  if (isManualProvider(metadata.provider)) {
+    setStatus(
+      `Output ${folderName} geladen.`,
+      'success',
+      'Prompt-only-Workflow aktiv. Du kannst pro Asset den Prompt kopieren und externe Bilder hochladen.',
+    );
+    return;
+  }
+
   setStatus(`Output ${folderName} geladen.`, 'success', 'Einzelne Assets konnen direkt neu generiert werden.');
 };
 
@@ -476,6 +603,97 @@ const deleteOutput = async (folderName) => {
   }
 };
 
+const fileToBase64 = (file) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      const base64 = result.split(',')[1] || '';
+      resolve(base64);
+    };
+
+    reader.onerror = () => {
+      reject(new Error('Datei konnte nicht gelesen werden.'));
+    };
+
+    reader.readAsDataURL(file);
+  });
+};
+
+const copyPromptToClipboard = async (job, assetType) => {
+  const prompt = getPromptForAsset(job, assetType);
+
+  if (!prompt) {
+    setStatus(`Kein Prompt fur ${assetLabel(assetType)} gefunden.`, 'error');
+    return;
+  }
+
+  try {
+    if (!navigator.clipboard?.writeText) {
+      throw new Error('Clipboard API not available');
+    }
+
+    await navigator.clipboard.writeText(prompt);
+    setStatus(`${assetLabel(assetType)} Prompt kopiert.`, 'success', 'Der Prompt liegt jetzt in der Zwischenablage.');
+  } catch {
+    window.prompt(`Prompt fur ${assetLabel(assetType)}:`, prompt);
+    setStatus(`${assetLabel(assetType)} Prompt angezeigt.`, 'success', 'Die Zwischenablage war nicht verfugbar, daher wurde der Prompt in einem Dialog geoeffnet.');
+  }
+};
+
+const uploadAsset = async (assetType, file) => {
+  if (!currentJob) {
+    return;
+  }
+
+  if (!SUPPORTED_UPLOAD_TYPES.includes(file.type)) {
+    setStatus(
+      'Upload fehlgeschlagen.',
+      'error',
+      `Unterstuetzte Dateitypen: ${SUPPORTED_UPLOAD_TYPES.join(', ')}`,
+    );
+    return;
+  }
+
+  if (generateBtn) {
+    generateBtn.disabled = true;
+  }
+
+  setStatus(
+    `${assetLabel(assetType)} wird hochgeladen ...`,
+    'info',
+    `Datei: ${file.name} | Nach dem Upload wird das Asset direkt im Set gespeichert.`,
+  );
+
+  try {
+    const payload = {
+      folderName: currentJob.folderName,
+      assetType,
+      mimeType: file.type,
+      imageBase64: await fileToBase64(file),
+    };
+
+    const updatedJob = await asJson(
+      await fetch('/api/upload-asset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }),
+    );
+
+    renderJob(updatedJob);
+    await refreshOutputs();
+    setStatus(`${assetLabel(assetType)} gespeichert.`, 'success', 'Das extern erzeugte Bild wurde dem Output-Set hinzugefugt.');
+  } catch (error) {
+    setStatus(`Upload fehlgeschlagen: ${error.message}`, 'error', 'Das Asset wurde nicht gespeichert.');
+  } finally {
+    if (generateBtn) {
+      generateBtn.disabled = false;
+    }
+  }
+};
+
 const regenerateAsset = async (assetType) => {
   if (!currentJob) {
     return;
@@ -502,10 +720,13 @@ const regenerateAsset = async (assetType) => {
     generateBtn.disabled = true;
   }
 
+  const manualMode = providerInfo.mode === 'manual';
   setStatus(
-    `${assetLabel(assetType)} wird neu generiert ...`,
+    manualMode ? `${assetLabel(assetType)} Prompt wird aktualisiert ...` : `${assetLabel(assetType)} wird neu generiert ...`,
     'info',
-    `Output-Ordner: ${currentJob.folderName} | Provider: ${providerInfo.label}`,
+    manualMode
+      ? `Output-Ordner: ${currentJob.folderName} | Danach kannst du den aktualisierten Prompt direkt kopieren.`
+      : `Output-Ordner: ${currentJob.folderName} | Provider: ${providerInfo.label}`,
   );
 
   try {
@@ -531,12 +752,18 @@ const regenerateAsset = async (assetType) => {
 
     renderJob(updatedJob);
     await refreshOutputs();
-    setStatus(`${assetLabel(assetType)} wurde neu generiert.`, 'success', 'Metadata.json wurde aktualisiert.');
+    setStatus(
+      manualMode ? `${assetLabel(assetType)} Prompt aktualisiert.` : `${assetLabel(assetType)} wurde neu generiert.`,
+      'success',
+      manualMode ? 'Der gespeicherte Prompt wurde aktualisiert.' : 'Metadata.json wurde aktualisiert.',
+    );
   } catch (error) {
     setStatus(
-      `Regeneration fehlgeschlagen: ${error.message}`,
+      manualMode ? `Prompt-Aktualisierung fehlgeschlagen: ${error.message}` : `Regeneration fehlgeschlagen: ${error.message}`,
       'error',
-      'Das bestehende Output-Set wurde nicht uberschrieben.',
+      manualMode
+        ? 'Der bestehende Prompt blieb unveraendert.'
+        : 'Das bestehende Output-Set wurde nicht uberschrieben.',
     );
   } finally {
     if (generateBtn) {
@@ -588,11 +815,19 @@ if (form) {
       generateBtn.disabled = true;
     }
 
-    setStatus(
-      'Komplettes Set wird generiert ...',
-      'info',
-      `Provider: ${providerInfo.label} | Der Server erzeugt jetzt vier 9-Frame-Walk-Loops, SV Battler Idle, SV Battler Attack, Faces, Portrait und Base Fullbody.`,
-    );
+    if (providerInfo.mode === 'manual') {
+      setStatus(
+        'Prompt-Paket wird erstellt ...',
+        'info',
+        `Provider: ${providerInfo.label} | Es werden keine API-Bilder erzeugt. Pro Asset wird nur ein kopierbarer Prompt gespeichert.`,
+      );
+    } else {
+      setStatus(
+        'Komplettes Set wird generiert ...',
+        'info',
+        `Provider: ${providerInfo.label} | Der Server erzeugt jetzt vier 9-Frame-Walk-Loops, SV Battler Idle, SV Battler Attack, Faces, Portrait und Base Fullbody.`,
+      );
+    }
 
     try {
       const job = await asJson(
@@ -605,12 +840,22 @@ if (form) {
 
       renderJob(job);
       await refreshOutputs();
-      setStatus('Komplettes Set gespeichert.', 'success', `Output-Ordner: ${job.folderName}`);
+      setStatus(
+        providerInfo.mode === 'manual' ? 'Prompt-Paket gespeichert.' : 'Komplettes Set gespeichert.',
+        'success',
+        providerInfo.mode === 'manual'
+          ? `Output-Ordner: ${job.folderName} | Jetzt kannst du pro Asset den Prompt kopieren und ein extern erzeugtes Bild hochladen.`
+          : `Output-Ordner: ${job.folderName}`,
+      );
     } catch (error) {
       setStatus(
-        `Generierung fehlgeschlagen: ${error.message}`,
+        providerInfo.mode === 'manual'
+          ? `Prompt-Paket konnte nicht erstellt werden: ${error.message}`
+          : `Generierung fehlgeschlagen: ${error.message}`,
         'error',
-        'Bitte Eingaben oder Server-Konfiguration prufen.',
+        providerInfo.mode === 'manual'
+          ? 'Bitte Eingaben oder Server-Konfiguration prufen.'
+          : 'Bitte Eingaben oder Server-Konfiguration prufen.',
       );
     } finally {
       if (generateBtn) {
@@ -633,3 +878,4 @@ void loadProviders()
   .catch((error) => {
     setStatus(`Initiale Daten konnten nicht geladen werden: ${error.message}`, 'error');
   });
+

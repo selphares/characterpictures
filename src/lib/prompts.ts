@@ -1,4 +1,4 @@
-﻿import { ALL_ASSET_TYPES, AssetType, CharacterRequest } from '../types.js';
+import { ALL_ASSET_TYPES, AssetType, CharacterRequest } from '../types.js';
 
 export type ImageSize = '1024x1024' | '1024x1536' | '1536x1024' | 'auto';
 export type ImageBackground = 'transparent' | 'opaque' | 'auto';
@@ -45,6 +45,23 @@ const CORE_RULES = [
   'Keep the composition clean and game-ready.',
   'Use anime JRPG art with clean linework and readable cel shading unless the user asks for another style.',
   'For animation sheets, use equal cell size, stable camera framing, and keep the character at consistent scale in every frame.',
+];
+
+const SPRITE_ASSET_TYPES: AssetType[] = [
+  'walk_down',
+  'walk_left',
+  'walk_right',
+  'walk_up',
+  'battler',
+  'battler_attack',
+];
+
+const SPRITE_SHEET_RULES = [
+  'consistent character sheet',
+  'same character model sheet reference',
+  'clean JRPG sprite sheet style',
+  'game-ready production sprite sheet',
+  'consistent proportions across all frames',
 ];
 
 const ANCHOR_FILENAME = 'consistency_anchor.png';
@@ -219,13 +236,32 @@ export const buildAssetPrompt = (
   promptOverride?: string,
 ): string => {
   const config = getAssetConfig(assetType);
+  const spriteSheetRules = SPRITE_ASSET_TYPES.includes(assetType)
+    ? `Sprite sheet consistency requirements: ${SPRITE_SHEET_RULES.join('. ')}.`
+    : undefined;
 
   return joinSections([
     buildCorePrompt(request),
     `Asset type: ${assetType}.`,
+    spriteSheetRules,
     `Asset-specific instruction: ${config.assetInstruction}`,
     promptOverride ? `Asset-specific override: ${promptOverride}.` : undefined,
     'Generate exactly one PNG image.',
+  ]);
+};
+
+export const buildManualPromptEnvelope = (
+  prompt: string,
+  referenceFilenames: string[] = [],
+): string => {
+  const referenceLine = referenceFilenames.length
+    ? `Attach these existing reference images before generating: ${referenceFilenames.join(', ')}.`
+    : 'If possible, create base_fullbody and portrait first, add them to the set, then reuse them as references for the remaining assets.';
+
+  return joinSections([
+    referenceLine,
+    prompt,
+    'Consistency lock: keep the exact same character identity. Do not redesign the face, silhouette, proportions, outfit, palette, or species traits.',
   ]);
 };
 

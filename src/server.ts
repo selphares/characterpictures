@@ -8,7 +8,7 @@ import { loadLocalEnvFile } from './lib/env.js';
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
 
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '25mb' }));
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true });

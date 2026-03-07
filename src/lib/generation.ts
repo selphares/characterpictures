@@ -3,6 +3,7 @@ import {
   AssetType,
   CharacterRequest,
   GeneratedFileInfo,
+  GeneratedFileSource,
   GenerationJob,
   JobStatus,
   OutputMetadata,
@@ -13,9 +14,12 @@ import {
   generateImage,
   getImageGenerationContext,
   ImageReference,
+  isManualPromptProvider,
   resolveImageProvider,
 } from './image-service.js';
 import {
+  buildManualPromptEnvelope,
+  getAssetConfig,
   getConsistencyAnchorFilename,
   planAssets,
   planConsistencyAnchor,
@@ -31,7 +35,14 @@ import {
 const randomId = () => Math.random().toString(36).slice(2, 10);
 const MAX_REFERENCE_IMAGES = 3;
 const ANCHOR_REFERENCE_ID = 'consistency_anchor' as const;
+const SUPPORTED_UPLOAD_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+const UPLOAD_MIME_TO_EXTENSION: Record<(typeof SUPPORTED_UPLOAD_MIME_TYPES)[number], string> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/webp': '.webp',
+};
 
+type UploadMimeType = (typeof SUPPORTED_UPLOAD_MIME_TYPES)[number];
 type ReferenceId = AssetType | typeof ANCHOR_REFERENCE_ID;
 
 const GENERATION_PRIORITY: AssetType[] = [
@@ -104,6 +115,8 @@ const parsePngDimensions = (buffer: Buffer): { width: number; height: number } |
 
 const buildStatusFromFiles = (files: GeneratedFileInfo[]): JobStatus => {
   const generatedCount = files.filter((file) => file.status === 'generated').length;
+  const failedCount = files.filter((file) => file.status === 'failed').length;
+  const pendingCount = files.filter((file) => file.status === 'pending').length;
 
   if (generatedCount === files.length) {
     return 'completed';
@@ -111,6 +124,18 @@ const buildStatusFromFiles = (files: GeneratedFileInfo[]): JobStatus => {
 
   if (generatedCount > 0) {
     return 'partial';
+  }
+
+  if (pendingCount === files.length) {
+    return 'draft';
+  }
+
+  if (failedCount === files.length) {
+    return 'failed';
+  }
+
+  if (pendingCount > 0) {
+    return 'draft';
   }
 
   return 'failed';
@@ -122,13 +147,15 @@ const buildGeneratedFileInfo = (
   filename: string,
   prompt: string,
   imageBuffer: Buffer,
+  mimeType = 'image/png',
+  source: GeneratedFileSource = 'api',
 ): GeneratedFileInfo => {
-  const dimensions = parsePngDimensions(imageBuffer);
+  const dimensions = mimeType === 'image/png' ? parsePngDimensions(imageBuffer) : undefined;
 
   return {
     assetType,
     filename,
-    mimeType: 'image/png',
+    mimeType,
     bytes: imageBuffer.byteLength,
     width: dimensions?.width,
     height: dimensions?.height,
@@ -136,6 +163,26 @@ const buildGeneratedFileInfo = (
     url: `/api/output/${folderName}/${filename}`,
     createdAt: new Date().toISOString(),
     status: 'generated',
+    source,
+  };
+};
+
+const buildPendingFileInfo = (
+  folderName: string,
+  assetType: AssetType,
+  filename: string,
+  prompt: string,
+): GeneratedFileInfo => {
+  return {
+    assetType,
+    filename,
+    mimeType: 'image/png',
+    bytes: 0,
+    prompt,
+    url: `/api/output/${folderName}/${filename}`,
+    createdAt: new Date().toISOString(),
+    status: 'pending',
+    source: 'prompt_plan',
   };
 };
 
@@ -155,6 +202,7 @@ const buildFailedFileInfo = (
     url: `/api/output/${folderName}/${filename}`,
     createdAt: new Date().toISOString(),
     status: 'failed',
+    source: 'api',
     error,
   };
 };
@@ -209,15 +257,32 @@ const buildReferenceLockedPrompt = (prompt: string, referenceIds: ReferenceId[])
     .join('\n');
 };
 
+const buildWorkflowPrompt = (
+  provider: CharacterRequest['provider'],
+  prompt: string,
+  references: BufferedReferenceImage[],
+): string => {
+  if (isManualPromptProvider(provider)) {
+    return buildManualPromptEnvelope(prompt, references.map((reference) => reference.filename));
+  }
+
+  return buildReferenceLockedPrompt(
+    prompt,
+    references.map((reference) => reference.referenceId),
+  );
+};
+
 const createBufferedReference = (
   referenceId: ReferenceId,
   filename: string,
   data: Buffer,
+  mimeType = 'image/png',
 ): BufferedReferenceImage => {
   return {
     referenceId,
     filename,
     data,
+    mimeType,
   };
 };
 
@@ -273,7 +338,7 @@ const tryLoadGeneratedAssetReference = async (
 
   try {
     const data = await readBinary(metadata.outputFolder, file.filename);
-    return createBufferedReference(assetType, file.filename, data);
+    return createBufferedReference(assetType, file.filename, data, file.mimeType);
   } catch {
     return undefined;
   }
@@ -344,6 +409,45 @@ const generateAnchorReference = async (
   }
 };
 
+const normalizeUploadMimeType = (mimeType: string): UploadMimeType => {
+  const normalizedMimeType = mimeType.trim().toLowerCase() as UploadMimeType;
+
+  if (!SUPPORTED_UPLOAD_MIME_TYPES.includes(normalizedMimeType)) {
+    throw new Error(`Unsupported image mime type: ${mimeType}`);
+  }
+
+  return normalizedMimeType;
+};
+
+const buildUploadedAssetFilename = (assetType: AssetType, mimeType: UploadMimeType): string => {
+  const configuredFilename = getAssetConfig(assetType).filename;
+  const baseName = configuredFilename.replace(/\.[^.]+$/, '');
+  return `${baseName}${UPLOAD_MIME_TO_EXTENSION[mimeType]}`;
+};
+
+const buildManualPromptFileInfo = (
+  existingFile: GeneratedFileInfo | undefined,
+  folderName: string,
+  assetType: AssetType,
+  fallbackFilename: string,
+  prompt: string,
+): GeneratedFileInfo => {
+  if (!existingFile) {
+    return buildPendingFileInfo(folderName, assetType, fallbackFilename, prompt);
+  }
+
+  return {
+    ...existingFile,
+    filename: existingFile.filename || fallbackFilename,
+    mimeType: existingFile.mimeType || 'image/png',
+    prompt,
+    url: `/api/output/${folderName}/${existingFile.filename || fallbackFilename}`,
+    status: existingFile.status === 'failed' ? 'pending' : existingFile.status,
+    source: existingFile.status === 'generated' ? existingFile.source ?? 'manual_upload' : 'prompt_plan',
+    error: undefined,
+  };
+};
+
 export const createGenerationJob = async (
   inputRequest: CharacterRequest,
 ): Promise<GenerationJob> => {
@@ -358,8 +462,46 @@ export const createGenerationJob = async (
   const promptVariants: Partial<Record<AssetType, string>> = {};
   const files: GeneratedFileInfo[] = [];
   const errors: NonNullable<GenerationJob['errors']> = [];
-  const generatedAssets = new Map<AssetType, BufferedReferenceImage>();
 
+  if (isManualPromptProvider(provider)) {
+    for (const plannedAsset of planAssets(request, generationOrder)) {
+      const finalPrompt = buildWorkflowPrompt(provider, plannedAsset.prompt, []);
+      promptVariants[plannedAsset.assetType] = finalPrompt;
+      files.push(buildPendingFileInfo(folderName, plannedAsset.assetType, plannedAsset.filename, finalPrompt));
+    }
+
+    const status = buildStatusFromFiles(files);
+    const metadata = createOutputMetadata({
+      folderName,
+      request: {
+        ...request,
+        provider,
+        assetTypes,
+      },
+      files,
+      promptVariants,
+      status,
+      durationMs: Date.now() - startedAt,
+      model,
+    });
+
+    await saveMetadata(folderName, metadata);
+
+    return {
+      id: randomId(),
+      status,
+      folderName,
+      request: {
+        ...request,
+        provider,
+        assetTypes,
+      },
+      files: metadata.files,
+      metadata,
+    };
+  }
+
+  const generatedAssets = new Map<AssetType, BufferedReferenceImage>();
   const anchorReference = await generateAnchorReference(folderName, request, model);
 
   for (const plannedAsset of planAssets(request, generationOrder)) {
@@ -368,10 +510,7 @@ export const createGenerationJob = async (
       anchorReference,
       generatedAssets,
     );
-    const finalPrompt = buildReferenceLockedPrompt(
-      plannedAsset.prompt,
-      referenceImages.map((reference) => reference.referenceId),
-    );
+    const finalPrompt = buildWorkflowPrompt(provider, plannedAsset.prompt, referenceImages);
 
     promptVariants[plannedAsset.assetType] = finalPrompt;
 
@@ -385,6 +524,7 @@ export const createGenerationJob = async (
         references: referenceImages.map((reference) => ({
           filename: reference.filename,
           data: reference.data,
+          mimeType: reference.mimeType,
         })),
       });
 
@@ -464,10 +604,48 @@ export const regenerateAsset = async (
     [request.assetType]: normalizeOptionalText(request.promptOverride),
   })[0];
   const referenceImages = await buildRegenerationReferences(metadata, request.assetType);
-  const finalPrompt = buildReferenceLockedPrompt(
-    plannedAsset.prompt,
-    referenceImages.map((reference) => reference.referenceId),
-  );
+  const finalPrompt = buildWorkflowPrompt(provider, plannedAsset.prompt, referenceImages);
+
+  if (isManualPromptProvider(provider)) {
+    const existingFile = metadata.files.find((file) => file.assetType === request.assetType);
+    const manualFile = buildManualPromptFileInfo(
+      existingFile,
+      metadata.outputFolder,
+      request.assetType,
+      plannedAsset.filename,
+      finalPrompt,
+    );
+    const filesAfterReplace = metadata.files
+      .filter((file) => file.assetType !== request.assetType)
+      .concat(manualFile);
+    const status = buildStatusFromFiles(filesAfterReplace);
+    const updatedMetadata = replaceFileInMetadata(
+      {
+        ...metadata,
+        provider,
+        model,
+      },
+      manualFile,
+      finalPrompt,
+      status,
+    );
+
+    await saveMetadata(metadata.outputFolder, updatedMetadata);
+
+    return {
+      id: randomId(),
+      status,
+      folderName: metadata.outputFolder,
+      request: {
+        ...characterRequest,
+        provider,
+        assetTypes: [...ALL_ASSET_TYPES],
+        outputDirName: metadata.outputFolder,
+      },
+      files: updatedMetadata.files,
+      metadata: updatedMetadata,
+    };
+  }
 
   const imageBuffer = await generateImage({
     provider,
@@ -478,6 +656,7 @@ export const regenerateAsset = async (
     references: referenceImages.map((reference) => ({
       filename: reference.filename,
       data: reference.data,
+      mimeType: reference.mimeType,
     })),
   });
 
@@ -521,3 +700,74 @@ export const regenerateAsset = async (
     metadata: updatedMetadata,
   };
 };
+
+export const uploadAssetImage = async ({
+  folderName,
+  assetType,
+  mimeType,
+  imageBuffer,
+}: {
+  folderName: string;
+  assetType: AssetType;
+  mimeType: string;
+  imageBuffer: Buffer;
+}): Promise<GenerationJob> => {
+  const metadata = await readMetadata(folderName);
+  const normalizedMimeType = normalizeUploadMimeType(mimeType);
+  const uploadFilename = buildUploadedAssetFilename(assetType, normalizedMimeType);
+  const existingFile = metadata.files.find((file) => file.assetType === assetType);
+  const characterRequest = loadRequestFromMetadata(metadata, {
+    folderName,
+    assetType,
+  });
+  const fallbackPrompt = planAssets(characterRequest, [assetType])[0]?.prompt;
+  const finalPrompt = metadata.promptVariants[assetType] ?? existingFile?.prompt ?? fallbackPrompt ?? '';
+
+  await saveBinary(metadata.outputFolder, uploadFilename, imageBuffer);
+
+  const uploadedFile = buildGeneratedFileInfo(
+    metadata.outputFolder,
+    assetType,
+    uploadFilename,
+    finalPrompt,
+    imageBuffer,
+    normalizedMimeType,
+    'manual_upload',
+  );
+  const filesAfterReplace = metadata.files
+    .filter((file) => file.assetType !== assetType)
+    .concat(uploadedFile);
+  const status = buildStatusFromFiles(filesAfterReplace);
+  const updatedMetadata = replaceFileInMetadata(
+    {
+      ...metadata,
+      model: metadata.model,
+      provider: resolveImageProvider(metadata.provider),
+    },
+    uploadedFile,
+    finalPrompt,
+    status,
+  );
+
+  await saveMetadata(metadata.outputFolder, updatedMetadata);
+
+  return {
+    id: randomId(),
+    status,
+    folderName: metadata.outputFolder,
+    request: {
+      characterName: metadata.characterName,
+      description: metadata.description,
+      style: metadata.style,
+      notes: metadata.notes,
+      seed: metadata.seed,
+      provider: resolveImageProvider(metadata.provider),
+      assetTypes: [...ALL_ASSET_TYPES],
+      outputDirName: metadata.outputFolder,
+    },
+    files: updatedMetadata.files,
+    metadata: updatedMetadata,
+  };
+};
+
+

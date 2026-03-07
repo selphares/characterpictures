@@ -2,15 +2,17 @@
 
 Lokale Web-App mit Node.js und TypeScript im Backend sowie einem statischen Frontend fur die serverseitige Generierung eines kompletten RPG Maker MZ Charakter-Asset-Sets.
 
-Unterstuetzte Bildprovider:
+Unterstuetzte Provider-Modi:
 - OpenAI `gpt-image-1.5`
 - Google Gemini Image via Gemini API (`GOOGLE_IMAGE_MODEL`, standardmassig `gemini-3.1-flash-image-preview`)
+- ChatGPT Prompt-Paket mit manuellem Bild-Import
+- Gemini Prompt-Paket mit manuellem Bild-Import
 
 ## Voraussetzungen
 
 - Node.js 20+
 - npm
-- mindestens ein API Key in `.env`
+- fur API-Modi mindestens ein API Key in `.env`
 
 ## Installation
 
@@ -35,7 +37,8 @@ GOOGLE_IMAGE_MODEL=gemini-3.1-flash-image-preview
 Hinweise:
 - Alternativ zu `GOOGLE_API_KEY` akzeptiert der Server auch `GEMINI_API_KEY`.
 - Beide Keys bleiben strikt serverseitig und werden nie ins Frontend geschrieben.
-- Im UI kann der Bildprovider pro Generierung uber ein Dropdown ausgewahlt werden.
+- Im UI kann der Provider pro Generierung uber ein Dropdown ausgewahlt werden.
+- Die Prompt-Paket-Modi fur ChatGPT und Gemini brauchen keinen API-Key.
 
 ## Startbefehle
 
@@ -63,15 +66,15 @@ Jede Generierung landet in einem eigenen Ordner unter `outputs/`:
 
 ```text
 outputs/<character-name>-<timestamp>/
-  walk_down.png
-  walk_left.png
-  walk_right.png
-  walk_up.png
-  battler.png
-  battler_attack.png
-  faces.png
-  portrait.png
-  base_fullbody.png
+  walk_down.png|jpg|webp
+  walk_left.png|jpg|webp
+  walk_right.png|jpg|webp
+  walk_up.png|jpg|webp
+  battler.png|jpg|webp
+  battler_attack.png|jpg|webp
+  faces.png|jpg|webp
+  portrait.png|jpg|webp
+  base_fullbody.png|jpg|webp
   metadata.json
 ```
 
@@ -82,6 +85,7 @@ outputs/<character-name>-<timestamp>/
 - `GET /api/providers`
 - `POST /api/generate-set`
 - `POST /api/regenerate-asset`
+- `POST /api/upload-asset`
 - `GET /api/list-outputs`
 - `GET /api/output/:folder/:file`
 - `GET /api/output/:folder/metadata`
@@ -89,12 +93,21 @@ outputs/<character-name>-<timestamp>/
 
 ## Typische Nutzung
 
+API-Modus:
 1. Charaktername, Hauptbeschreibung, Stil und Zusatzhinweise im Formular eingeben.
-2. Gewunschten Bildprovider im Dropdown auswahlen.
+2. OpenAI oder Google Gemini API im Provider-Dropdown auswahlen.
 3. `Generate Full Set` auslosen.
 4. Das erzeugte Set im Preview-Panel pruefen.
-5. Einzelne Assets uber `Neu generieren` oder das Asset-Actions-Panel gezielt erneut erzeugen.
-6. Fruhere Generierungen uber die Output-Liste wieder laden.
+5. Einzelne Assets uber `Neu generieren` gezielt erneut erzeugen.
+
+Prompt-Paket-Modus:
+1. Charaktername, Hauptbeschreibung, Stil und Zusatzhinweise eingeben.
+2. `ChatGPT Prompt Paket` oder `Gemini Prompt Paket` auswahlen.
+3. `Prompt-Paket erstellen` auslosen.
+4. Pro Asset den gespeicherten Prompt kopieren.
+5. Das Bild extern in ChatGPT oder Gemini erzeugen.
+6. Das Ergebnis pro Asset uber `Bild hochladen` wieder in dasselbe Set importieren.
+7. Falls du spaeter bessere Referenzen hast, pro Asset `Prompt aktualisieren` nutzen.
 
 ## Ordnerstruktur
 
@@ -114,8 +127,10 @@ outputs/
 
 - Die Walking-Assets werden auf 9-Frame-Loops in 3x3-Layouts ausgerichtet.
 - `battler.png` ist als 9-Frame-SV-Idle-Sheet gedacht, `battler_attack.png` als 9-Frame-SV-Attack-Sheet.
-- Die Generierung lauft in einer festen Reihenfolge mit einem internen `consistency_anchor.png` als kanonischem Turnaround-Modellblatt, damit nachfolgende Assets dieselbe Figur konsequent uber Referenzbilder nachziehen.
+- Die API-Generierung lauft in einer festen Reihenfolge mit einem internen `consistency_anchor.png` als kanonischem Turnaround-Modellblatt, damit nachfolgende Assets dieselbe Figur konsequent uber Referenzbilder nachziehen.
 - Re-Generate einzelner Assets verwendet den internen Consistency-Anchor und passende bereits vorhandene Set-Bilder wieder als Referenzen, um Gesicht, Outfit und Proportionen enger zusammenzuhalten.
+- Im Prompt-Paket-Modus werden keine Bild-API-Kosten verursacht. Die App speichert nur die finalen Prompts und wartet auf manuell importierte Bilder.
+- Hochgeladene externe Bilder werden aktuell als `png`, `jpg` oder `webp` gespeichert.
 - OpenAI bietet die praezisere Groessen- und Transparenzsteuerung. Google Gemini wird uber die offizielle Gemini Image Generation API angebunden und setzt Formatwunsche primar uber Prompt-Instruktionen plus Referenzbilder um.
 - Wenn die Bild-API einzelne Parameter oder Referenz-Edits nicht akzeptiert, verwendet der OpenAI-Pfad kompatible Fallbacks.
 
@@ -123,7 +138,3 @@ outputs/
 
 - [Google Gemini API Image Generation](https://ai.google.dev/gemini-api/docs/image-generation?hl=de#best-practices)
 - [Google Gen AI SDK](https://ai.google.dev/gemini-api/docs/sdks)
-
-
-
-

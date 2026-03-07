@@ -4,6 +4,7 @@ const DEFAULT_GOOGLE_MODEL = 'gemini-3.1-flash-image-preview';
 export interface GoogleReferenceImage {
   filename: string;
   data: Buffer;
+  mimeType?: string;
 }
 
 export interface GoogleImageInput {
@@ -97,7 +98,7 @@ const buildRequestBody = (input: GoogleImageInput) => {
   for (const reference of input.references ?? []) {
     parts.push({
       inline_data: {
-        mime_type: 'image/png',
+        mime_type: reference.mimeType ?? 'image/png',
         data: reference.data.toString('base64'),
       },
     });
